@@ -230,8 +230,10 @@ def _render_result(result: AnalysisResult):
             result.explanation
             or "No qualified champion. Development results remain available for exploration."
         )
-    for warning in result.warnings:
-        st.warning(warning)
+    if result.warnings:
+        with st.expander(f"Assumptions and limitations ({len(result.warnings)})"):
+            for warning in result.warnings:
+                st.write(f"• {warning}")
     table = model_table(result)
     eligible = [model for model in result.models if model.predictions]
     first, second, third = st.columns(3)
@@ -239,11 +241,17 @@ def _render_result(result: AnalysisResult):
     second.metric("Pareto alternatives", sum(model.is_pareto for model in result.models))
     third.metric("Horizon", "1 month")
     if result.next_forecast:
-        st.markdown("#### Next forecast")
-        st.json(result.next_forecast, expanded=True)
-        st.caption(
-            "Experimental output. A development recommendation is not automatically a qualified live model."
+        forecast = result.next_forecast
+        period = pd.Timestamp(forecast["period"]).strftime("%B %Y")
+        st.metric(
+            f"Next forecast · {period}",
+            f"{forecast['predicted']:,.2f} {forecast.get('unit', 'units')}",
         )
+        st.caption(
+            "Experimental one-month forecast in the original target units. Prediction intervals are not available in this milestone."
+        )
+        with st.expander("Forecast calculation and transformation evidence"):
+            st.json(forecast, expanded=True)
     if eligible:
         model_ids = [model.model_id for model in eligible]
         preferred = result.recommended_id if result.recommended_id in model_ids else model_ids[0]
@@ -449,8 +457,29 @@ def main():
             st.info("Run a comparison to populate the numerical decision trail.")
         with closing(Conversation(directory / "conversations.sqlite", dataset)) as conversation:
             graph = conversation.graph_mermaid()
+            topology = conversation.graph.get_graph()
+            dot = [
+                'digraph workflow { rankdir=LR; node [shape=box, style="rounded,filled", fillcolor="#eef6f3", color="#13876f", fontname="Arial"];'
+            ]
+            for node in topology.nodes:
+                label = {
+                    "__start__": "Start",
+                    "__end__": "Finish",
+                    "review": "User review",
+                    "analysis": "Numerical analysis",
+                }.get(node, node.title())
+                dot.append(f"{json.dumps(node)} [label={json.dumps(label)}];")
+            for edge in topology.edges:
+                style = " [style=dashed]" if edge.conditional else ""
+                dot.append(f"{json.dumps(edge.source)} -> {json.dumps(edge.target)}{style};")
+            dot.append("}")
         st.markdown("#### Executable conversation graph")
-        st.code(graph, language="mermaid")
+        st.graphviz_chart("\n".join(dot), width="stretch")
+        st.caption(
+            "Dashed arrows are conditional routes. Detailed numerical choices appear in the decision trail above."
+        )
+        with st.expander("Mermaid graph source"):
+            st.code(graph, language="mermaid")
         st.download_button("Download graph", graph, file_name="manto-demo-workflow.mmd")
         with st.expander("Active demo policy"):
             st.json(load_policy())
