@@ -7,6 +7,31 @@ import plotly.graph_objects as go
 
 from manto.domain import AnalysisResult, ModelResult
 
+METRIC_LABELS = {
+    "development_mae": "MAE (validation)",
+    "development_rmse": "RMSE (validation)",
+    "development_r2": "R² (validation)",
+    "development_mape": "MAPE (validation)",
+    "max_vif": "Max VIF",
+    "block_mae_std": "Error variability",
+    "baseline_mae": "Baseline MAE (validation)",
+    "train_r2": "R² (training)",
+    "train_adjusted_r2": "Adjusted R² (training)",
+    "holdout_mae": "MAE (holdout)",
+    "holdout_rmse": "RMSE (holdout)",
+    "holdout_r2": "R² (holdout)",
+    "holdout_mape": "MAPE (holdout)",
+    "holdout_baseline_mae": "Baseline MAE (holdout)",
+}
+
+
+def candidate_metrics(result: AnalysisResult) -> pd.DataFrame:
+    """All computed metrics, with undefined/non-finite values unavailable for plotting."""
+    frame = pd.DataFrame([model.metrics for model in result.models], dtype=float)
+    return frame.replace([float("inf"), float("-inf")], float("nan")).dropna(
+        axis="columns", how="all"
+    )
+
 
 def model_table(result: AnalysisResult) -> pd.DataFrame:
     return pd.DataFrame(

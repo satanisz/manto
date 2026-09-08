@@ -16,7 +16,13 @@ from pydantic import ValidationError
 from manto.data import demo_dataset, load_csv
 from manto.domain import AnalysisRequest, AnalysisResult
 from manto.policy import load_policy
-from manto.reporting import model_table, prediction_chart, render_report
+from manto.reporting import (
+    METRIC_LABELS,
+    candidate_metrics,
+    model_table,
+    prediction_chart,
+    render_report,
+)
 from manto.storage import ResultStore
 from manto.workflow import Conversation
 
@@ -292,22 +298,54 @@ def _render_result(result: AnalysisResult):
             "Reason",
         ]
         st.dataframe(table[display_columns], hide_index=True, width="stretch")
-        finite = table.dropna(subset=["MAE", "Max VIF"])
-        if len(finite) > 1:
+        metrics = candidate_metrics(result)
+        options = list(metrics.columns)
+        if options:
+            left_axis, right_axis = st.columns(2)
+            x_metric = left_axis.selectbox(
+                "X axis",
+                options,
+                index=options.index("development_mae") if "development_mae" in options else 0,
+                format_func=lambda key: METRIC_LABELS.get(key, key),
+                key=f"comparison_x_{result.experiment_id}",
+            )
+            y_metric = right_axis.selectbox(
+                "Y axis",
+                options,
+                index=options.index("max_vif") if "max_vif" in options else 0,
+                format_func=lambda key: METRIC_LABELS.get(key, key),
+                key=f"comparison_y_{result.experiment_id}",
+            )
+            finite = metrics.dropna(subset=[x_metric, y_metric]).join(
+                table[["Model", "Variables", "Pareto"]]
+            )
+            st.caption(
+                f"Showing {len(finite)} of {len(table)} candidates with finite values on both axes. "
+                "Axis selection does not change the original Pareto membership or recommendation. "
+                "Higher R² is better; lower forecast errors and VIF are better. "
+                "Training fit and out-of-sample scores have different interpretations. "
+                "Holdout metrics exist only for the frozen recommended model."
+            )
+        else:
+            finite = pd.DataFrame()
+        if not finite.empty:
             scatter = px.scatter(
                 finite,
-                x="MAE",
-                y="Max VIF",
+                x=x_metric,
+                y=y_metric,
+                labels=METRIC_LABELS,
                 color="Pareto",
-                hover_data=["Model", "Variables", "Error variability"],
+                hover_data=["Model", "Variables"],
                 color_discrete_map={True: "#13876f", False: "#a8b4bf"},
             )
             scatter.update_layout(
                 template="plotly_white",
                 height=330,
-                title="Forecast error vs. collinearity — lower is better",
+                title="Candidate metric comparison",
             )
-            st.plotly_chart(scatter, width="stretch")
+            st.plotly_chart(scatter, width="stretch", key=f"comparison_{result.experiment_id}")
+        else:
+            st.info("No candidates have finite values for the selected metrics.")
     with st.expander("Validation dates and evidence"):
         st.json(result.split)
     left, right = st.columns(2)

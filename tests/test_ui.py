@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 from streamlit.testing.v1 import AppTest
@@ -33,6 +34,25 @@ def test_offline_full_comparison_and_reopen(tmp_path, monkeypatch):
     assert result["recommended_id"]
     assert any(model["is_pareto"] for model in result["models"])
     assert list((tmp_path / "experiments").glob("*/manifest.json"))
+    x_axis = next(item for item in app.selectbox if item.label == "X axis")
+    y_axis = next(item for item in app.selectbox if item.label == "Y axis")
+    assert x_axis.value == "development_mae"
+    assert y_axis.value == "max_vif"
+    assert "R² (training)" in x_axis.options
+    assert "RMSE (validation)" in y_axis.options
+    x_axis.select("train_r2")
+    y_axis.select("development_rmse").run()
+    assert not app.exception
+    scatter = json.loads(app.get("plotly_chart")[-1].proto.spec)
+    assert scatter["layout"]["xaxis"]["title"]["text"] == "R² (training)"
+    assert scatter["layout"]["yaxis"]["title"]["text"] == "RMSE (validation)"
+    assert app.session_state["analysis_result"] == result
+    next(item for item in app.selectbox if item.label == "Y axis").select("train_r2").run()
+    assert not app.exception  # The same metric on both axes is supported.
+    next(item for item in app.selectbox if item.label == "X axis").select("holdout_mae")
+    next(item for item in app.selectbox if item.label == "Y axis").select("holdout_rmse").run()
+    assert not app.exception
+    assert any("Showing 1 of" in item.value for item in app.caption)
     next(item for item in app.button if item.label == "Open saved analysis").click().run()
     assert not app.exception
     assert app.session_state["analysis_result"]["experiment_id"] == result["experiment_id"]
