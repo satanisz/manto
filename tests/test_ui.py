@@ -59,3 +59,14 @@ def test_dataset_identity_includes_metadata():
     old = _dataset_key(data)
     data.provenance = "different_origin"
     assert _dataset_key(data) != old
+
+
+def test_new_chat_target_replaces_previous_widget_selection(tmp_path, monkeypatch):
+    monkeypatch.setenv("MANTO_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("MANTO_ENABLE_GEMINI", "false")
+    monkeypatch.setenv("MANTO_ENABLE_LANGFUSE", "false")
+    app = AppTest.from_file(str(APP), default_timeout=30).run()
+    assert app.session_state["target_choice"] == "sales"
+    app.chat_input[0].set_value("Forecast inflation with 2 variables").run()
+    assert not app.exception
+    assert app.session_state["target_choice"] == "inflation"

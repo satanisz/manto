@@ -69,6 +69,8 @@ def _open_saved(directory, experiment_id):
 
 
 def _start(directory, dataset, message):
+    st.session_state.pop("target_choice", None)
+    st.session_state.pop("request_defaults", None)
     thread_id = str(uuid4())
     st.session_state["thread_id"] = thread_id
     state = _conversation_call(directory, dataset, "start", thread_id, message)
@@ -277,7 +279,19 @@ def _render_result(result: AnalysisResult):
             )
     if not table.empty:
         st.markdown("#### Compare all candidates")
-        st.dataframe(table, hide_index=True, width="stretch")
+        display_columns = [
+            "Pareto",
+            "MAE",
+            "RMSE",
+            "Max VIF",
+            "R² (validation)",
+            "Error variability",
+            "Variables",
+            "Model",
+            "Status",
+            "Reason",
+        ]
+        st.dataframe(table[display_columns], hide_index=True, width="stretch")
         finite = table.dropna(subset=["MAE", "Max VIF"])
         if len(finite) > 1:
             scatter = px.scatter(
