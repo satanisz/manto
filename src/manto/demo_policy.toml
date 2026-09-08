@@ -1,0 +1,23 @@
+# Executed scope of the sprint 6 demo. The broader config/decision_policy.toml
+# remains the roadmap for subsequent statistical and monitoring capabilities.
+version = "demo-0.1"
+scope = "sprint_6_linear_demo"
+target_scale = "original_user_units"
+target_transform_default = "auto"
+feature_transform_default = "auto"
+default_model_size = 3
+max_external_series = 4
+default_lag_menu = [0]
+max_models = 5000
+max_fits = 100000
+initial_train = 60
+min_development = 24
+holdout_periods = 12
+stationarity_alpha = 0.05
+champion_requires_supported_post_transform_stationarity = true
+unconfirmed_stationarity_action = "exploratory_only"
+target_origin_availability = "Y(t)_must_be_observed_at_month_end_t"
+pareto_minimize = ["development_mae", "max_vif", "block_mae_std"]
+champion_shortlist_relative_mae_tolerance = 0.05
+promotion = "no_live_model_promotion_in_demo"
+later_sprints = ["cointegration", "ecm", "advanced_seasonality", "full_residual_diagnostics", "monitoring"]

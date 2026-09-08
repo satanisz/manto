@@ -1,6 +1,7 @@
 # Manto: Executive Plan
 
-Version 0.1, 2026-09-08. Proposed design, not implemented functionality.
+Version 0.1, 2026-09-08. Product roadmap. The sprint 6 demo is now implemented;
+see [actual scope and limitations](DEMO_GUIDE.md). Later milestones remain proposed.
 Numerical thresholds are initial product policies to validate, not universal statistical rules.
 
 ## 1. Product thesis
@@ -62,7 +63,7 @@ They are versioned modeling decisions, not hidden preprocessing defaults.
 | Decision | Working assumption | Resolution point |
 | --- | --- | --- |
 | First use case | Poland, with WIG20 as the example target | Sprint 1 |
-| Target scale | User chooses index level, change, or return after seeing implications | Before freezing the first experiment |
+| Target scale | Original user-facing Y; training-only transformations and inverse forecasts are internal, explicit decisions | Confirmed by the owner; optional overrides remain visible |
 | Data | Public macro sources plus a target file import; verify WIG20 history access | Sprint 1 |
 | Deployment | Local single-user Python application, modular monolith | Before UI implementation |
 | UI | Streamlit and Plotly, separate from the analytical core | Sprint 2 dependency spike |
