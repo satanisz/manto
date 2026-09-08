@@ -149,6 +149,17 @@ def _recipe(values, mode):
     }
 
 
+def _latest_contiguous(values):
+    """Trim unpublished trailing periods without joining across internal gaps."""
+    values = np.asarray(values, dtype=float)
+    available = np.flatnonzero(np.isfinite(values))
+    if not len(available):
+        return values[:0]
+    observed = values[: available[-1] + 1]
+    gaps = np.flatnonzero(~np.isfinite(observed))
+    return observed[gaps[-1] + 1 :] if len(gaps) else observed
+
+
 class _Panel:
     def __init__(self, dataset, request, calendar):
         self.calendar = calendar
@@ -252,6 +263,7 @@ def _fit(panel, origin, features, target_recipe, first_train, min_train):
             "design": design,
             "training_pairs": len(y),
             "omitted_training_pairs": int((~usable).sum()),
+            "training_origin_indices": historical[usable],
         },
     )
 
@@ -295,6 +307,7 @@ def _prediction(panel, origin, predicted, baseline, split):
 
 def _diagnostics(fit):
     residuals, design = fit["residuals"], fit["design"]
+    calendar_regular = bool(np.all(np.diff(fit["training_origin_indices"]) == 1))
     if np.ptp(residuals) < 1e-12:
         return {
             "scope": "last_development_training_fold_transformed_response",
@@ -305,18 +318,27 @@ def _diagnostics(fit):
     diagnostics = {
         "scope": "last_development_training_fold_transformed_response",
         "interpretation": "Post-selection descriptive diagnostics, not causal evidence.",
-        "residual_adf": _adf(residuals),
-        "durbin_watson": float(durbin_watson(residuals)),
+        "residual_adf": _adf(residuals)
+        if calendar_regular
+        else {"pvalue": None, "status": "unavailable_gapped_training_calendar"},
+        "durbin_watson": float(durbin_watson(residuals)) if calendar_regular else None,
+        "temporal_tests_status": "available"
+        if calendar_regular
+        else "unavailable_gapped_training_calendar",
         "shapiro_pvalue": float(stats.shapiro(residuals).pvalue),
         "training_pairs": fit["training_pairs"],
         "omitted_training_pairs": fit["omitted_training_pairs"],
     }
     try:
         diagnostics["breusch_pagan_pvalue"] = float(het_breuschpagan(residuals, design)[1])
-        diagnostics["ljung_box_pvalue"] = float(
-            acorr_ljungbox(
-                residuals, lags=[min(12, len(residuals) // 5)], return_df=True
-            ).lb_pvalue.iloc[0]
+        diagnostics["ljung_box_pvalue"] = (
+            float(
+                acorr_ljungbox(
+                    residuals, lags=[min(12, len(residuals) // 5)], return_df=True
+                ).lb_pvalue.iloc[0]
+            )
+            if calendar_regular
+            else None
         )
     except (ValueError, np.linalg.LinAlgError):
         diagnostics["diagnostic_warning"] = "Some residual tests unavailable."
@@ -396,8 +418,7 @@ def run_analysis(
         stop = start + 1 if series == request.target_id else start
         values = panel.snapshots[start, :stop, panel.index[series]]
         # Never bridge missing months: ADF needs a contiguous training segment.
-        missing = np.flatnonzero(~np.isfinite(values))
-        contiguous = values[missing[-1] + 1 :] if len(missing) else values
+        contiguous = _latest_contiguous(values)
         mode = (
             request.target_transform if series == request.target_id else request.feature_transform
         )
@@ -587,14 +608,23 @@ def run_analysis(
             chosen.metrics["development_mae"] < chosen.metrics["baseline_mae"]
             and chosen.metrics["holdout_mae"] < chosen.metrics["holdout_baseline_mae"]
         )
-        if beats_baseline and "latest" not in dataset.provenance:
+        unsupported_series = [
+            series
+            for series in [request.target_id, *chosen.features]
+            if recipes[series]["after"]["status"] != "stationary_evidence"
+        ]
+        provenance_supported = dataset.provenance in {
+            "synthetic_point_in_time",
+            "verified_point_in_time",
+        } or dataset.provenance.startswith("synthetic;")
+        if beats_baseline and provenance_supported and not unsupported_series:
             result.champion_id = chosen.model_id
         result.status = "completed" if result.champion_id else "no_qualified_champion"
         result.explanation = (
             "The frozen recommendation beat the persistence baseline on development and holdout. "
             "This is a heuristic eligibility check, not proof of significance."
             if result.champion_id
-            else "The recommendation remains available, but did not qualify as champion under the baseline/provenance audit."
+            else "The recommendation remains available for exploration, but did not qualify as champion under the baseline, provenance and stationarity audit."
         )
         decide(
             "D13",
@@ -603,6 +633,8 @@ def run_analysis(
             model_id=chosen.model_id,
             holdout_mae=chosen.metrics["holdout_mae"],
             holdout_baseline_mae=chosen.metrics["holdout_baseline_mae"],
+            stationarity_unconfirmed_series=unsupported_series,
+            provenance_supported=provenance_supported,
         )
     except (ValueError, np.linalg.LinAlgError) as exc:
         chosen.predictions.extend(audit)
@@ -644,8 +676,7 @@ def run_analysis(
         later_evidence = {}
         for series in [request.target_id, *chosen.features]:
             values = panel.snapshots[origin, : origin + 1, panel.index[series]]
-            missing = np.flatnonzero(~np.isfinite(values))
-            contiguous = values[missing[-1] + 1 :] if len(missing) else values
+            contiguous = _latest_contiguous(values)
             later_evidence[series] = _adf(_transform(contiguous, recipes[series]["recipe"]))
             if later_evidence[series]["status"] != "stationary_evidence":
                 result.warnings.append(

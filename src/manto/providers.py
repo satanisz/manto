@@ -112,7 +112,7 @@ def offline_intent(message: str, catalog: list[SeriesInfo]) -> IntentProposal:
         size = int(token) if token.isdigit() else words[token]
     pins = []
     pin_cue = re.search(
-        r"\b(?:pin|pinned|fix|fixed|include|zafiks\w*|zafix\w*|uwzglednij)\b", plain
+        r"\b(?:pin|pinned|fix|fixed|include|including|zafiks\w*|zafix\w*|uwzglednij)\b", plain
     )
     if pin_cue:
         pins = [item for item in _mentions(message[pin_cue.end() :], catalog) if item != target]

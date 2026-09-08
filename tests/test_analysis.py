@@ -166,6 +166,15 @@ def test_latest_vintage_cannot_qualify_champion():
     assert result.status == "no_qualified_champion"
 
 
+def test_unverified_csv_vintages_are_exploratory():
+    data = dataset()
+    data.provenance = "user_csv; user_supplied_availability"
+    result = run_analysis(data, request())
+    assert result.recommended_id
+    assert result.champion_id is None
+    assert result.next_forecast is not None
+
+
 def test_no_champion_when_persistence_is_perfect_and_mape_is_undefined():
     data = dataset()
     data.observations.loc[data.observations.series_id == "y", "value"] = 0.0
@@ -198,3 +207,50 @@ def test_lag_grid_compares_separate_forecasters():
     assert result.recommended_id == "ols|x@1"
     chosen = next(model for model in result.models if model.model_id == result.recommended_id)
     assert chosen.metrics["development_mae"] < 1e-10
+
+
+def test_delayed_publications_do_not_empty_stationarity_prefix():
+    data = dataset()
+    mask = data.observations.series_id == "x"
+    data.observations.loc[mask, "available_at"] += pd.DateOffset(months=2)
+    result = run_analysis(
+        data, request(candidate_ids=["x"], lag_menu=[2], feature_transform="auto")
+    )
+    recipe = result.models[0].transformations["x"]
+    assert recipe["before"]["status"] == "stationary_evidence"
+    assert recipe["recipe"] == "identity"
+    assert result.next_forecast["stationarity_reassessment"]["x"]["pvalue"] is not None
+
+
+def test_temporal_residual_tests_do_not_compress_calendar_gaps():
+    from manto.analysis import _diagnostics
+
+    rng = np.random.default_rng(9)
+    result = _diagnostics(
+        {
+            "residuals": rng.normal(size=80),
+            "design": np.column_stack([np.ones(80), rng.normal(size=80)]),
+            "training_origin_indices": np.r_[np.arange(40), np.arange(41, 81)],
+            "training_pairs": 80,
+            "omitted_training_pairs": 1,
+        }
+    )
+    assert result["temporal_tests_status"] == "unavailable_gapped_training_calendar"
+    assert result["residual_adf"]["pvalue"] is None
+    assert result["durbin_watson"] is None
+    assert result["ljung_box_pvalue"] is None
+    assert result["shapiro_pvalue"] is not None
+
+
+def test_unconfirmed_stationarity_cannot_qualify_champion(monkeypatch):
+    baseline = run_analysis(dataset(), request(candidate_ids=["x"]))
+    assert baseline.champion_id
+    monkeypatch.setattr(
+        "manto.analysis._adf", lambda values: {"pvalue": 0.9, "status": "unit_root_not_rejected"}
+    )
+    exploratory = run_analysis(dataset(), request(candidate_ids=["x"]))
+    assert exploratory.recommended_id == baseline.recommended_id
+    assert exploratory.champion_id is None
+    assert exploratory.next_forecast is not None
+    decision = next(item for item in exploratory.decisions if item.rule_id == "D13")
+    assert decision.evidence["stationarity_unconfirmed_series"] == ["y", "x"]
