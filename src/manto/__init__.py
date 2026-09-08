@@ -1,4 +1,3 @@
-"""Pakiet manto."""
+"""The manto package."""
 
 __version__ = "0.1.0"
-

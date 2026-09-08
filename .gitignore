@@ -10,4 +10,9 @@ build/
 dist/
 .idea/
 .vscode/
-
+.manto/
+.env.*
+!.env.example
+*.sqlite*
+htmlcov/
+.coverage

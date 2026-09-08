@@ -1,0 +1,230 @@
+# Design contract only. No runtime consumes this file yet.
+# All numeric defaults require validation with the first agreed dataset.
+policy_version = "0.1.0-draft"
+status = "proposed_not_executable"
+decision_ids = ["D01", "D02", "D03", "D04", "D05", "D06", "D07", "D08", "D09", "D10", "D11", "D12", "D13", "D14", "D15", "D16", "D17", "D18", "D19", "D20"]
+
+[experiment]
+objectives = ["forecasting", "historical_association"]
+frequency = "monthly"
+horizon_periods = 1
+target_count = 1
+target_scale = "resolve_with_user_before_freeze"
+max_external_series = 4
+default_size_mode = "exact"
+pinned_series_count_toward_size = true
+pinned_meaning = "mandatory_inclusion"
+max_estimated_parameters = 12
+min_training_observations_per_estimated_parameter = 10
+parameter_count_policy = "family_specific_including_intercept_and_all_estimation_stages"
+
+[catalog]
+default_candidate_count = 10
+selection_modes = ["assistant_proposal", "manual", "mixed", "all_eligible"]
+relevance_target = "Y"
+user_edits_override_llm_proposals = true
+require_real_catalog_ids = true
+unknown_series_action = "ask_or_mark_unavailable"
+
+[search]
+max_specifications = 5000
+max_fit_operations = 100000
+count_family_lag_and_transformation_variants = true
+count_all_ecm_estimation_stages = true
+count_inner_lag_selection_fits = true
+overflow_action = "user_scope_or_budget_decision"
+silent_truncation = false
+freeze_before_development_scoring = true
+
+[data]
+feature_availability = "as_of_forecast_origin"
+require_observation_and_availability_dates = true
+missing_vintage_status = "latest_vintage_exploratory"
+missing_vintage_promotion = "shadow_only_until_prospective_evidence"
+quarterly_to_monthly_interpolation = false
+future_backfill = false
+preserve_raw_snapshots = true
+missing_origin_handling = "record_failure_do_not_silently_drop"
+
+[validation]
+scheme = "expanding_window_one_step"
+min_usable_observations = 120
+initial_train_periods = 60
+min_development_outcomes = 24
+final_holdout_periods = 12
+development_error_block_periods = 12
+training_window_rule = "max_initial_window_and_parameter_based_minimum"
+gap_rule = "derive_from_label_overlap_and_availability_contract"
+common_evaluation_origins = true
+common_forecast_target_scale = true
+preprocessing_fit_scope = "training_prefix_only"
+holdout_usage = "audit_one_frozen_choice_once"
+post_holdout_edits = "exploratory_until_fresh_evidence"
+short_sample_action = "explicit_reduced_evidence_or_block"
+
+[families]
+core = ["ols", "lagged_linear", "stationary_change_linear", "linear_ecm", "fourier_linear"]
+required_descriptive = ["stl_decomposition"]
+optional_challengers = ["stl_linear_forecast"]
+deferred = ["ardl_bounds", "sarimax", "var", "vecm", "neural_forecasting"]
+family_permission_frozen_before_scoring = true
+
+[stationarity]
+decision_id = "D06"
+tests = ["adf", "kpss"]
+alpha = 0.05
+test_fit_scope = "current_training_prefix"
+deterministic_terms_and_lags = "declared_in_frozen_specification"
+inconclusive_action = "supported_transformation_or_explicit_review"
+i2_action = "unsupported_in_poc"
+
+[cointegration]
+decision_id = "D07"
+method = "engle_granger"
+alpha = 0.05
+require_supported_i1_prerequisites = true
+candidate_specific = true
+use_cointegration_critical_values = true
+test_alignment = "common_economic_observation_periods"
+forecast_alignment = "only_observable_equilibrium_error_and_short_run_terms"
+supported_route = "linear_ecm"
+unsupported_route = "stationary_changes_or_inconclusive"
+mixed_integration_route = "stationary_transforms_ardl_bounds_deferred"
+reestimate_both_stages_each_fold = true
+ordinary_residual_adf_is_cointegration_test = false
+causal_claim_allowed = false
+
+[lags]
+decision_id = "D19"
+external_lag_menu_periods = [0, 1, 2, 3, 6, 12]
+lag_zero_requires_observed_at_origin = true
+separate_economic_and_publication_lags = true
+default_lags_per_external_series = 1
+max_lags_per_external_series_if_extension_enabled = 2
+optional_target_lag_menu_periods = [1, 2, 3, 12]
+external_lag_convention = "X(t-L)_for_origin_t"
+target_lag_convention = "Y(t+1-j)_for_response_Y(t+1)"
+selection_modes = ["frozen_grid_as_separate_candidates", "inner_chronological_training_validation"]
+selection_must_not_see_outer_validation_outcome = true
+respect_pinned_lag_and_transform = true
+infeasible_constraint_action = "explicit_user_choice_or_candidate_failure"
+
+[transformations]
+decision_id = "D20"
+allowed = ["identity", "log", "first_difference", "log_difference", "seasonal_difference"]
+fit_scope = "current_training_prefix_only"
+log_requires_strictly_positive_values = true
+max_ordinary_difference_order = 1
+max_seasonal_difference_order = 1
+automatic_combined_differencing = false
+require_pre_and_post_stationarity_evidence = true
+inconclusive_action = "review_or_unsupported_not_repeat_until_significant"
+ecm_long_run_levels_preserved = true
+ecm_short_run_stationary_recipe_required = true
+trim_sample_before_parameter_adequacy_check = true
+persist_inverse_recipe = true
+inverse_anchors_must_be_observable = true
+log_inverse_estimand = "explicit_mean_or_median_with_training_only_correction"
+variant_cycles = "finite_predeclared_ids_no_repeated_transformation_loop"
+
+[seasonality]
+decision_id = "D08"
+candidate_period = 12
+min_complete_cycles_for_diagnostics = 3
+evidence = ["adjustment_metadata", "seasonal_plot", "acf", "periodogram", "subwindow_stability"]
+absence_of_evidence_action = "keep_nonseasonal_specification"
+max_fourier_pairs = 1
+full_sample_decomposition_in_backtest = false
+stl_requires_explicit_forecaster_and_reseasonalization = true
+stl_forecast_comparison = "separate_until_comparable_complexity_is_defined"
+avoid_automatic_double_seasonal_adjustment = true
+
+[metrics]
+primary_error = "development_mae"
+report = ["train_r2", "train_adjusted_r2", "oos_r2", "mae", "rmse", "baseline_relative_error", "max_vif_when_applicable", "forecast_coverage", "block_mae_std"]
+mape = "optional_for_eligible_nonzero_target_scales"
+mape_for_returns = false
+mape_near_zero_threshold = "target_specific_before_freeze"
+undefined_metric_action = "explicit_unavailable_status"
+vif_intercept_in_objectives = false
+
+[pareto]
+decision_id = "D10"
+linear_objectives_minimize = ["development_mae", "max_training_fold_predictor_vif", "development_block_mae_std"]
+cross_family_objectives_minimize = ["development_mae", "development_block_mae_std", "effective_parameter_count"]
+dominance = "no_worse_all_and_strictly_better_one"
+numeric_relative_tolerance = 1e-9
+numeric_absolute_tolerance = 1e-12
+require_defined_comparable_objectives = true
+preserve_ties = true
+diagnose_every_front_member = true
+recompute_after_new_hard_exclusions = true
+empty_result = "no_qualified_champion"
+
+[diagnostics]
+decision_id = "D11"
+tests = ["shapiro_wilk", "residual_adf", "durbin_watson", "breusch_pagan", "ljung_box_or_breusch_godfrey"]
+plots = ["actual_vs_prediction", "residual_timeline", "residual_vs_fitted", "histogram", "qq", "acf", "pacf", "periodogram", "rolling_error"]
+method_specific = ["equilibrium_error", "ecm_adjustment_stability", "seasonal_components"]
+alpha = 0.05
+normality_rejection_is_automatic_disqualification = false
+post_selection_pvalues = "diagnostic_not_confirmatory"
+prediction_interval_policy = "declare_method_and_coverage_or_unavailable"
+
+[champion]
+decision_id = "D12"
+mae_relative_shortlist_tolerance = 0.05
+zero_best_mae_tolerance = "pareto_numeric_absolute_tolerance"
+tie_break_order = ["development_block_mae_std", "effective_parameter_count", "stable_model_id"]
+require_baseline_audit_for_qualified_status = true
+baseline_audit_policy = "chosen_model_mae_below_predeclared_primary_baseline_on_development_and_final_holdout"
+baseline_audit_claim = "heuristic_eligibility_not_statistical_significance"
+llm_must_choose_eligible_id = true
+llm_must_reference_evidence = true
+llm_disagreement_with_rule_default = "preserve_both_and_user_resolves_before_holdout_audit"
+llm_cannot_override_hard_gates = true
+
+[agent]
+provider = "gemini_api"
+model_id = "resolve_and_pin_during_integration"
+max_structured_output_repairs = 2
+max_transient_retries = 3
+tools = "allowlisted_deterministic_functions"
+llm_failure_fallback = "evidence_based_template"
+checkpoint_user_interrupts = true
+idempotent_side_effects = true
+
+[observability]
+provider = "langfuse"
+policy_source = "versioned_repository_file"
+persist_local_decisions_before_telemetry = true
+redact_credentials = true
+record_evidence_and_short_rationale = true
+record_private_reasoning = false
+outage_action = "queue_telemetry_and_show_sync_status"
+
+[monitoring]
+decision_ids = ["D15", "D16", "D17", "D18"]
+status = "planned_not_running"
+poll_schedule = "daily_release_calendar_aware"
+forecast_schedule = "monthly_at_declared_origin"
+min_matured_forecasts = 12
+rolling_error_window = 12
+mae_degradation_ratio = 1.25
+consecutive_new_origins = 3
+zero_reference_error_rule = "target_specific_absolute_tolerance"
+insufficient_evidence_status = "insufficient_evidence"
+deduplication_key = ["model_version", "rule_id", "outcome_origin"]
+notify_on = ["meaningful_change", "failure", "required_user_action"]
+default_channel = "in_app_inbox"
+champion_replacement = "explicit_user_activation"
+preserve_incumbent_and_rollback = true
+poc_validation_mode = "historical_replay_with_simulated_clock"
+
+[monitoring.rule_calibration]
+freshness = "source_release_calendar_and_agreed_grace_period"
+input_drift = "choose_reference_test_and_sample_minimum_in_sprint_13"
+interval_coverage = "choose_window_and_coverage_tolerance_in_sprint_13"
+ecm_stability = "define_equilibrium_error_and_dynamic_stability_triggers_in_sprint_13"
+seasonal_stability = "define_component_change_triggers_in_sprint_13"
+threshold_status = "provisional_require_historical_replay_calibration"

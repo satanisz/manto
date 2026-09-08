@@ -5,10 +5,37 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "manto"
 version = "0.1.0"
-description = "Projekt Python w układzie src."
+description = "A conversational assistant for transparent time-series analysis."
 readme = "README.md"
 requires-python = ">=3.11"
+dependencies = [
+    "numpy>=2.1,<3",
+    "pandas>=2.2,<3",
+    "scipy>=1.14,<2",
+    "statsmodels>=0.14,<0.15",
+    "pydantic>=2.10,<3",
+    "requests>=2.32,<3",
+    "streamlit>=1.42,<2",
+    "plotly>=5.24,<7",
+    "langgraph>=1.0,<2",
+    "langgraph-checkpoint-sqlite>=3,<4",
+    "google-genai>=1.0,<2",
+    "langfuse>=3,<4",
+    "python-dotenv>=1,<2",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8,<10", "ruff>=0.9,<1"]
+
+[project.scripts]
+manto = "manto.__main__:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
 
 [tool.setuptools.packages.find]
 where = ["src"]
-
