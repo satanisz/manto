@@ -92,7 +92,14 @@ class Conversation:
         )
         graph.add_edge("analysis", "explain")
         graph.add_edge("explain", END)
-        self.graph = graph.compile(checkpointer=SqliteSaver(self.conn))
+        # LangGraph writes checkpoints in its background executor. Application
+        # cache transactions must not share that connection: SqliteSaver's lock
+        # protects only its own calls, not our cache inserts/commits.
+        self.checkpoint_conn = sqlite3.connect(
+            str(database_path), check_same_thread=False, timeout=30
+        )
+        self.checkpoint_conn.execute("PRAGMA journal_mode=WAL")
+        self.graph = graph.compile(checkpointer=SqliteSaver(self.checkpoint_conn))
 
     def __enter__(self):
         return self
@@ -102,6 +109,7 @@ class Conversation:
 
     def close(self):
         self.observability.flush()
+        self.checkpoint_conn.close()
         self.conn.close()
 
     @staticmethod

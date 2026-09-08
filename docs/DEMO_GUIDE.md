@@ -146,6 +146,13 @@ experiment is overwritten with a different result.
 
 ## Verification commands and milestone evidence
 
+Final acceptance run: **62 tests passed**. This includes numerical leakage and
+inverse-transform tests, CSV/snapshot integrity, mocked provider failures, real
+SQLite restart and rapid checkpoint/result writes, plus Streamlit interaction
+tests through comparison and saved-input restoration. Lint passed and source/wheel
+packaging succeeded. A real browser walkthrough confirmed the 36-model example,
+five Pareto alternatives, and the original-scale forecast chart.
+
 ```powershell
 uv run pytest -q
 uv run ruff check src tests

@@ -66,7 +66,7 @@ def test_review_checkpoint_survives_restart_and_completion_is_idempotent(
     with Conversation(path, dataset, analyzer) as conversation:
         assert conversation.state("one")["status"] == "awaiting_input"
         completed = conversation.resume("one", {"request": request_data, "approved": True})
-        assert completed["status"] == "completed"
+        assert completed["status"] == "completed", completed["messages"]
         assert completed["result"]["status"] == "no_qualified_champion"
         assert [item["rule_id"] for item in completed["result"]["decisions"]] == [
             "D01",
@@ -76,6 +76,19 @@ def test_review_checkpoint_survives_restart_and_completion_is_idempotent(
         assert conversation.resume("one", {"request": request_data, "approved": True}) == completed
         assert conversation.start("one", "Another request") == completed
         assert len(calls) == 1
+
+
+def test_fast_result_writes_do_not_race_checkpoint_transactions(tmp_path, dataset, request_data):
+    path = tmp_path / "transaction-stress.sqlite"
+    with Conversation(path, dataset, result_for) as conversation:
+        assert conversation.conn is not conversation.checkpoint_conn
+        for index in range(20):
+            thread_id = f"fast-{index}"
+            conversation.start(thread_id, "Forecast sales with two variables; pin inflation")
+            state = conversation.resume(thread_id, {"request": request_data, "approved": True})
+            assert state["status"] == "completed", state["messages"]
+    with Conversation(path, dataset, result_for) as restored:
+        assert all(restored.state(f"fast-{index}")["status"] == "completed" for index in range(20))
 
 
 def test_missing_information_and_invalid_inputs_reinterrupt(tmp_path, dataset, request_data):
