@@ -14,8 +14,10 @@ from manto.providers import redact
 def dataset_digest(dataset: Dataset) -> str:
     return digest(
         {
-            "data": dataset.observations.to_json(date_format="iso", orient="split"),
-            "catalog": [entry.model_dump() for entry in dataset.catalog],
+            "data": dataset.observations.to_csv(index=False),
+            "catalog": [
+                entry.model_dump() for entry in sorted(dataset.catalog, key=lambda item: item.id)
+            ],
             "provenance": dataset.provenance,
         }
     )
@@ -68,7 +70,7 @@ def training_evidence(dataset: Dataset, draft: AnalysisDraft, ids: list[str]) ->
     months = frame.loc[frame.series_id == target, "period"]
     start = pd.Timestamp(months.min())
     stop = start + pd.offsets.MonthBegin(24)
-    cutoff = stop - pd.Timedelta(nanoseconds=1)
+    cutoff = (start + pd.offsets.MonthBegin(23)).to_period("M").end_time
     subset = (
         frame.loc[
             frame.series_id.isin(ids)

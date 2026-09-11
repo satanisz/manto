@@ -27,7 +27,7 @@ from manto.agent_tools import (
     training_evidence,
     validate_catalog,
 )
-from manto.domain import AnalysisResult
+from manto.domain import AnalysisResult, Decision
 from manto.drafts import AnalysisDraft, DialogueState
 from manto.providers import Observability, _plain, redact
 from manto.storage import ResultStore
@@ -63,6 +63,9 @@ class AgentConversation:
         self.conn.execute("PRAGMA journal_mode=WAL")
         self.conn.execute(
             "CREATE TABLE IF NOT EXISTS dialogue_datasets (id TEXT PRIMARY KEY, digest TEXT NOT NULL)"
+        )
+        self.conn.execute(
+            "CREATE TABLE IF NOT EXISTS dialogue_reports (thread_id TEXT PRIMARY KEY, report_json TEXT NOT NULL)"
         )
         self.conn.commit()
         self.lock = sqlite3.connect(self.directory / "dialogue_locks.sqlite", timeout=30)
@@ -167,7 +170,18 @@ class AgentConversation:
             self.graph.invoke(
                 {"dialogue": state.model_dump(), "message": message, "turn_id": turn_id}, config
             )
-            return self.state(thread_id)
+            completed = self.state(thread_id)
+            with self.conn:
+                if completed.report:
+                    self.conn.execute(
+                        "INSERT INTO dialogue_reports VALUES (?, ?) ON CONFLICT(thread_id) DO UPDATE SET report_json=excluded.report_json",
+                        (thread_id, json.dumps(completed.report)),
+                    )
+                else:
+                    self.conn.execute(
+                        "DELETE FROM dialogue_reports WHERE thread_id=?", (thread_id,)
+                    )
+            return completed
         finally:
             self.lock.rollback()
 
@@ -469,13 +483,146 @@ class AgentConversation:
         raise ValueError("Unsupported agent action.")
 
     def _execute(self, state, turn):
-        raise ValueError("Execution wiring is not available in this increment.")
+        report = state.report
+        if not report or not report["ready"]:
+            raise ValueError(
+                "Request a complete specification report and confirm all settings first."
+            )
+        supplied = re.search(r"\b[a-f0-9]{64}\b", turn["message"])
+        if supplied and supplied[0] != report["report_id"]:
+            raise ValueError("That report is stale. Inspect and approve the current report.")
+        mode = state.draft.values["run_mode"]
+        plain = _plain(turn["message"])
+        if ("full" in plain and mode != "full") or (
+            "preliminary" in plain and mode != "preliminary"
+        ):
+            raise ValueError(
+                "Requested mode differs from the report. Change run_mode and review first."
+            )
+        experiment_id = report["report_id"][:32]
+        existing = self.store.directory / experiment_id / "manifest.json"
+        if existing.exists():
+            result = self.store.load(experiment_id)
+            if result.specification_report != report:
+                raise ValueError("Stored result does not match this approval report.")
+        else:
+            current = self._report(state)
+            if current["report_id"] != report["report_id"]:
+                state.report = current
+                raise ValueError(
+                    "Configuration, policy, data, or exposure changed. Request and approve a fresh report."
+                )
+            from manto.analysis import run_analysis
+
+            try:
+                with self.observability.span("conversation.analysis", experiment_id):
+                    result = (self.analyzer or run_analysis)(
+                        self.dataset,
+                        state.draft.request(),
+                        experiment_id=experiment_id,
+                        run_mode=mode,
+                    )
+                result = AnalysisResult.model_validate(result)
+            except Exception as exc:  # noqa: BLE001 - sanitize provider/numerical boundary
+                raise ValueError(
+                    f"Analysis failed ({type(exc).__name__}); no result was promoted. You may retry the same report."
+                ) from None
+            result.parent_experiment_id = state.draft.parent_experiment_id
+            result.specification_report = report
+            result.holdout_exposed = report["holdout_exposed"]
+            if result.holdout_exposed and mode == "full":
+                result.champion_id = None
+                result.status = "exploratory_reused_holdout"
+                result.explanation += " This holdout overlaps previously viewed evidence; the audit is exploratory, not independent qualification."
+            result.decisions.insert(
+                0,
+                Decision(
+                    rule_id="C_APPROVAL",
+                    outcome="user_approved",
+                    explanation="Execution is bound to the exact confirmed report and input/policy hashes.",
+                    evidence={
+                        "report_id": report["report_id"],
+                        "turn_id": turn["turn_id"],
+                        "run_mode": mode,
+                        "holdout_exposed": result.holdout_exposed,
+                        "prompt_hash": PROMPT_HASH,
+                    },
+                ),
+            )
+            self.store.save(result, self.dataset)
+        state.result = result.model_dump(mode="json")
+        state.pending_fields = []
+        return (
+            result.explanation
+            + "\n\n"
+            + self._local(
+                state,
+                "Saved. Ask about selected lags, inspect models, or change a variable for a linked experiment.",
+                "Zapisano. Możesz zapytać o wybrane lagi, obejrzeć modele albo zmienić zmienną w nowym, powiązanym eksperymencie.",
+            )
+        )
 
     def _compare(self, state, reference):
-        raise ValueError("Saved comparison wiring is not available in this increment.")
+        if not state.result:
+            raise ValueError("Run or reopen an analysis first.")
+        result = AnalysisResult.model_validate(state.result)
+        parent_id = reference or result.parent_experiment_id
+        if not parent_id:
+            raise ValueError(
+                "This result has no parent. Open a saved analysis and change a variable or run mode first."
+            )
+        parent = self.store.load(parent_id)
+        same_target = parent.request.target_id == result.request.target_id
+        same_data = dataset_digest(self.store.load_dataset(parent_id)) == self.fingerprint
+        models = [
+            next((model for model in item.models if model.model_id == item.recommended_id), None)
+            for item in (parent, result)
+        ]
+        compatible = same_target and same_data and all(models)
+        aligned = []
+        if compatible:
+            predictions = [
+                {row["period"]: row for row in model.predictions if row["split"] == "development"}
+                for model in models
+            ]
+            common = sorted(set(predictions[0]) & set(predictions[1]))
+            compatible = bool(common) and all(
+                predictions[0][period]["actual"] == predictions[1][period]["actual"]
+                for period in common
+            )
+            if compatible:
+                for rows in predictions:
+                    aligned.append(
+                        {
+                            "origins": len(common),
+                            "start": common[0],
+                            "end": common[-1],
+                            "mae": sum(
+                                abs(rows[p]["actual"] - rows[p]["predicted"]) for p in common
+                            )
+                            / len(common),
+                        }
+                    )
+        payload = {
+            "parent": parent.experiment_id,
+            "current": result.experiment_id,
+            "run_modes": [parent.run_mode, result.run_mode],
+            "changes": {
+                key: {"before": getattr(parent.request, key), "after": getattr(result.request, key)}
+                for key in type(parent.request).model_fields
+                if getattr(parent.request, key) != getattr(result.request, key)
+            },
+            "comparable": bool(compatible),
+            "common_development_scores": aligned,
+            "holdout_exposed": result.holdout_exposed,
+            "note": "Compare development only on identical target/data and common outcomes; holdout modes remain separate. This is exploratory, not causal evidence.",
+        }
+        return "```json\n" + json.dumps(payload, ensure_ascii=False, indent=2) + "\n```"
 
     def _reply(self, turn):
         state = DialogueState.model_validate(turn["dialogue"])
         state.messages.append({"role": "assistant", "content": redact(turn["reply"])})
         state.processed_turns.append(turn["turn_id"])
+        # Read-only CLI projection; the graph checkpoint remains authoritative.
+        # This node can replay safely because the projection is an upsert.
         return {"dialogue": state.model_dump()}

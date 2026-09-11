@@ -101,3 +101,7 @@ class AnalysisResult(BaseModel):
     next_forecast: dict[str, Any] | None = None
     warnings: list[str] = Field(default_factory=list)
     policy_version: str = "demo-0.1"
+    run_mode: Literal["preliminary", "full"] = "full"
+    parent_experiment_id: str | None = None
+    specification_report: dict[str, Any] | None = None
+    holdout_exposed: bool = False

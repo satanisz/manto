@@ -21,12 +21,41 @@ def main() -> None:
     demo.add_argument("--pin", action="append", default=[])
     demo.add_argument("--lag", action="append", type=int)
     demo.add_argument("--output", default=os.getenv("MANTO_DATA_DIR", ".manto"))
+    spec = commands.add_parser(
+        "spec", help="Print a saved conversation specification without running analysis"
+    )
+    spec.add_argument("--conversation", required=True)
+    spec.add_argument("--directory", default=os.getenv("MANTO_DATA_DIR", ".manto"))
+    spec.add_argument("--json", action="store_true", dest="as_json")
     fetch = commands.add_parser("fetch-nbp", help="Fetch official monthly FX observations")
     fetch.add_argument("--code", default="EUR")
     fetch.add_argument("--start", required=True)
     fetch.add_argument("--end", required=True)
     fetch.add_argument("--output", default=".manto/imports")
     args = parser.parse_args()
+    if args.command == "spec":
+        import sqlite3
+
+        from manto.agent_tools import render_specification
+
+        path = (Path(args.directory) / "dialogue.sqlite").resolve()
+        try:
+            with sqlite3.connect(path.as_uri() + "?mode=ro", uri=True) as conn:
+                row = conn.execute(
+                    "SELECT report_json FROM dialogue_reports WHERE thread_id=?",
+                    (args.conversation,),
+                ).fetchone()
+            if not row:
+                parser.error("No current report. Ask the agent to show a specification first.")
+            report = json.loads(row[0])
+            print(
+                json.dumps(report, ensure_ascii=False, indent=2)
+                if args.as_json
+                else render_specification(report)
+            )
+        except (sqlite3.Error, OSError, ValueError):
+            parser.error("The saved specification could not be read.")
+        return
     if args.command == "ui":
         app = Path(__file__).with_name("ui.py")
         raise SystemExit(

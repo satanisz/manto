@@ -372,9 +372,15 @@ def _front(models):
 
 
 def run_analysis(
-    dataset: Dataset, request: AnalysisRequest, experiment_id: str | None = None
+    dataset: Dataset,
+    request: AnalysisRequest,
+    experiment_id: str | None = None,
+    *,
+    run_mode: str = "full",
 ) -> AnalysisResult:
-    """Run the full finite development grid, then audit one frozen recommendation."""
+    """Evaluate development models, optionally audit one frozen recommendation."""
+    if run_mode not in {"preliminary", "full"}:
+        raise ValueError("Unsupported execution mode")
     result = AnalysisResult(
         experiment_id=experiment_id or str(uuid4()),
         request=request,
@@ -382,6 +388,7 @@ def run_analysis(
         provenance=dataset.provenance,
         status="blocked",
         policy_version=_POLICY["version"],
+        run_mode=run_mode,
     )
 
     def decide(rule, outcome, explanation, **evidence):
@@ -408,9 +415,23 @@ def run_analysis(
         decide("D04", "blocked", result.explanation)
         return result
     calendar = _calendar(dataset, request)
-    panel = _Panel(dataset, request, calendar)
     start = work["first_development_index"]
     end = len(calendar) - 1 - request.holdout_periods
+    if run_mode == "preliminary":
+        # Remove holdout outcomes and later revisions before constructing any
+        # feature snapshots. Merely skipping the final scoring loop is not enough.
+        cutoff = calendar[end].to_period("M").end_time
+        observations = dataset.observations.loc[
+            (dataset.observations.period <= calendar[end])
+            & (dataset.observations.available_at <= cutoff)
+        ].copy()
+        panel = _Panel(
+            Dataset(observations, dataset.catalog, dataset.name, dataset.provenance),
+            request,
+            calendar[: end + 1],
+        )
+    else:
+        panel = _Panel(dataset, request, calendar)
     development, holdout = range(start, end), range(end, len(calendar) - 1)
     first_train = max(request.lag_menu) + 1
     recipes = {}
@@ -495,7 +516,7 @@ def run_analysis(
             feature_cache[series, lag] = np.array(
                 [
                     panel.feature(i, series, lag, recipes[series]["recipe"])
-                    for i in range(len(calendar))
+                    for i in range(len(panel.calendar))
                 ]
             )
     fit_cache = {}
@@ -587,6 +608,17 @@ def run_analysis(
         development_mae=chosen.metrics["development_mae"],
         shortlist_relative_tolerance=_POLICY["champion_shortlist_relative_mae_tolerance"],
     )
+    if run_mode == "preliminary":
+        result.status = "preliminary_completed"
+        result.explanation = (
+            "Development-only comparison saved. The recommendation is exploratory; "
+            "the holdout was not accessed and no champion or next forecast was issued."
+        )
+        result.split["holdout_evaluated"] = False
+        decide(
+            "D13", "not_requested", "Preliminary execution excludes the holdout and next forecast."
+        )
+        return result
     features = np.column_stack(
         [feature_cache[series, chosen.lags[series]] for series in chosen.features]
     )

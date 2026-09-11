@@ -11,10 +11,11 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 from dotenv import load_dotenv
-from pydantic import ValidationError
 
+from manto.agent_tools import render_specification
 from manto.data import demo_dataset, load_csv
-from manto.domain import AnalysisRequest, AnalysisResult
+from manto.dialogue import AgentConversation
+from manto.domain import AnalysisResult
 from manto.policy import load_policy
 from manto.reporting import (
     METRIC_LABELS,
@@ -67,6 +68,11 @@ def _open_saved(directory, experiment_id):
         st.session_state["dataset_key"] = _dataset_key(dataset)
         st.session_state["request_defaults"] = result.request.model_dump()
         st.session_state["analysis_result"] = result.model_dump(mode="json")
+        thread_id = str(uuid4())
+        with AgentConversation(directory, dataset) as chat:
+            dialogue = chat.import_result(thread_id, experiment_id)
+        st.session_state["thread_id"] = thread_id
+        st.session_state["dialogue_state"] = dialogue.model_dump()
         st.session_state.pop("load_error", None)
     except (ValueError, OSError):
         st.session_state["load_error"] = (
@@ -85,147 +91,13 @@ def _start(directory, dataset, message):
     _accept_state(state, directory, dataset)
 
 
-def _review(directory, dataset):
-    policy = load_policy()
-    state = st.session_state.get("conversation_state", {})
-    question = state.get("question") or {}
-    request = (
-        state.get("request")
-        or question.get("request")
-        or st.session_state.get("request_defaults")
-        or {}
-    )
-    if not isinstance(request, dict):
-        request = {}
-    if question:
-        st.info(question.get("message", "Review the experiment before running the comparison."))
-        for error in question.get("errors", []):
-            st.warning(str(error))
-    ids = [entry.id for entry in dataset.catalog]
-    labels = {entry.id: f"{entry.title} · {entry.id}" for entry in dataset.catalog}
-    target_default = request.get("target_id")
-    if target_default not in ids:
-        target_default = next(
-            (entry.id for entry in dataset.catalog if entry.role == "target"), ids[0]
-        )
-    # Target is outside the form so changing it immediately updates candidate options.
-    target = st.selectbox(
-        "What do you want to forecast?",
-        ids,
-        index=ids.index(target_default),
-        format_func=lambda value: labels[value],
-        key="target_choice",
-    )
-    available = [entry for entry in ids if entry != target]
-    candidates = [entry for entry in request.get("candidate_ids", available) if entry in available]
-    if not candidates:
-        candidates = available
-    pins = [entry for entry in request.get("pinned_ids", []) if entry in available]
-    with st.form("experiment_review"):
-        st.markdown("#### Your experiment")
-        selected = st.multiselect(
-            "Candidate variables",
-            available,
-            default=candidates,
-            format_func=lambda value: labels[value],
-        )
-        pinned = st.multiselect(
-            "Always include",
-            available,
-            default=pins,
-            format_func=lambda value: labels[value],
-            help="Pinned variables count toward model size. Include them in the candidate list.",
-        )
-        left, right = st.columns(2)
-        size = left.number_input(
-            "Variables per model", min_value=1, max_value=4, value=int(request.get("model_size", 3))
-        )
-        size_mode = right.selectbox(
-            "Search size",
-            ["exact", "up_to"],
-            index=0 if request.get("size_mode", "exact") == "exact" else 1,
-            format_func=lambda value: (
-                "Exactly this many" if value == "exact" else "Up to this many"
-            ),
-        )
-        lags = st.multiselect(
-            "Monthly predictor lags",
-            list(range(13)),
-            default=request.get("lag_menu", policy["default_lag_menu"]),
-            help="0 uses the origin month only if already published. Each extra lag expands the search.",
-        )
-        with st.expander("Transformation and validation settings"):
-            options = ["auto", "identity", "difference", "log_difference"]
-            target_transform = st.selectbox(
-                "Internal target transformation",
-                options,
-                index=options.index(request.get("target_transform", "auto")),
-                help="Auto checks only the initial training prefix. Forecasts return to original units.",
-            )
-            feature_options = ["auto", "identity", "difference"]
-            feature_transform = st.selectbox(
-                "Predictor transformation",
-                feature_options,
-                index=feature_options.index(request.get("feature_transform", "auto")),
-            )
-            st.caption(
-                "Monthly · one month ahead · expanding training window · final holdout kept separate."
-            )
-            train = st.number_input(
-                "Initial training months",
-                min_value=24,
-                max_value=600,
-                value=int(request.get("initial_train", policy["initial_train"])),
-            )
-            holdout = st.number_input(
-                "Final holdout months",
-                min_value=3,
-                max_value=60,
-                value=int(request.get("holdout_periods", policy["holdout_periods"])),
-            )
-        submitted = st.form_submit_button("Run model comparison", type="primary", width="stretch")
-    if submitted:
-        try:
-            spec = AnalysisRequest(
-                target_id=target,
-                candidate_ids=selected,
-                pinned_ids=pinned,
-                model_size=int(size),
-                size_mode=size_mode,
-                lag_menu=lags,
-                target_transform=target_transform,
-                feature_transform=feature_transform,
-                initial_train=int(train),
-                holdout_periods=int(holdout),
-                min_development=policy["min_development"],
-                max_models=policy["max_models"],
-                max_fits=policy["max_fits"],
-            )
-            from manto.analysis import estimate_work
-
-            work = estimate_work(dataset, spec)
-            if not work.get("within_budget", True):
-                st.error(
-                    work.get("reason")
-                    or "This search exceeds the work budget. Reduce candidates or lags."
-                )
-                return
-            with st.spinner(
-                f"Evaluating {work.get('model_count', 'candidate')} models on past-only windows…"
-            ):
-                if not state.get("question"):
-                    _start(directory, dataset, f"Analyze {target} with {size} variables.")
-                response = _conversation_call(
-                    directory,
-                    dataset,
-                    "resume",
-                    st.session_state["thread_id"],
-                    {"approved": True, "request": spec.model_dump()},
-                )
-                _accept_state(response, directory, dataset)
-            st.rerun()
-        except (ValidationError, ValueError) as error:
-            st.error(str(error))
+def _chat_send(directory, dataset, message):
+    thread_id = st.session_state.setdefault("thread_id", str(uuid4()))
+    with AgentConversation(directory, dataset) as chat:
+        state = chat.send(thread_id, message)
+    st.session_state["dialogue_state"] = state.model_dump()
+    if state.result:
+        st.session_state["analysis_result"] = state.result
 
 
 def _render_result(result: AnalysisResult):
@@ -411,6 +283,7 @@ def main():
         if st.button("New conversation", width="stretch"):
             for key in (
                 "conversation_state",
+                "dialogue_state",
                 "analysis_result",
                 "thread_id",
                 "user_message",
@@ -426,9 +299,14 @@ def main():
             thread = st.text_input("Conversation ID to resume")
             if st.button("Resume") and thread.strip():
                 try:
-                    state = _conversation_call(directory, dataset, "state", thread.strip())
+                    with AgentConversation(directory, dataset) as chat:
+                        state = chat.state(thread.strip())
                     st.session_state["thread_id"] = thread.strip()
-                    _accept_state(state, directory, dataset)
+                    st.session_state["dialogue_state"] = state.model_dump()
+                    if state.result:
+                        st.session_state["analysis_result"] = state.result
+                    else:
+                        st.session_state.pop("analysis_result", None)
                     st.rerun()
                 except ValueError:
                     st.error("This conversation cannot be resumed with the selected dataset.")
@@ -437,6 +315,7 @@ def main():
     if st.session_state.get("dataset_key") not in (None, dataset_key):
         for key in (
             "conversation_state",
+            "dialogue_state",
             "analysis_result",
             "thread_id",
             "user_message",
@@ -447,10 +326,7 @@ def main():
     st.session_state["dataset_key"] = dataset_key
     if st.session_state.get("load_error"):
         st.error(st.session_state["load_error"])
-    st.title("From a question to an explainable forecast.")
-    st.markdown(
-        "Explore a monthly target, compare small linear models, and see the evidence behind every choice."
-    )
+    st.title("Manto · Analytical conversation")
     if "synthetic" in dataset.provenance.lower():
         st.info(
             "Synthetic demonstration data — these are simulated relationships, not real market or business findings."
@@ -459,41 +335,54 @@ def main():
         ["Workspace", "Decision trail", "Data & sources", "Saved analyses"]
     )
     with workspace:
-        prompt = st.chat_input("Describe your target and any variables you want to include…")
-        if prompt:
-            with st.spinner("Preparing your experiment…"):
-                _start(directory, dataset, prompt)
-            st.rerun()
-        if st.session_state.get("user_message"):
-            with st.chat_message("user"):
-                st.write(st.session_state["user_message"])
-        conversation_state = st.session_state.get("conversation_state", {})
-        assistant_messages = [
-            item
-            for item in conversation_state.get("messages", [])
-            if item.get("role") == "assistant"
-        ]
-        if assistant_messages:
+        dialogue = st.session_state.get("dialogue_state", {})
+        st.caption(
+            dialogue.get("mode", "Gemini when configured · limited offline recovery otherwise")
+        )
+        for message in dialogue.get("messages", []):
+            with st.chat_message(message["role"]):
+                st.markdown(message["content"])
+        if not dialogue:
             with st.chat_message("assistant"):
-                st.write(assistant_messages[-1].get("content", ""))
-        if conversation_state.get("status") == "failed":
-            st.error("This run failed. Review the message above and start a new comparison.")
-        elif conversation_state.get("status") == "cancelled":
-            st.info("This conversation was cancelled. Start a new comparison when ready.")
-        if not st.session_state.get("conversation_state"):
-            st.caption(
-                "Start with a question, or configure the experiment below. "
-                "In offline mode the assistant uses a bounded catalog parser, not an LLM."
-            )
+                st.write(
+                    "What would you like to analyze? Tell me your business question. We can explore the available variables together before approving any calculations."
+                )
             if st.button("Try: forecast sales with 3 variables, including inflation"):
-                _start(directory, dataset, "Forecast sales with 3 variables, including inflation")
+                _chat_send(
+                    directory, dataset, "Forecast sales with 3 variables, including inflation"
+                )
                 st.rerun()
+        if dialogue.get("draft"):
+            with st.expander("Current analysis setup · read only"):
+                st.json(dialogue["draft"])
+        if dialogue.get("report"):
+            report = dialogue["report"]
+            left, right = st.columns(2)
+            left.download_button(
+                "Download specification",
+                render_specification(report),
+                file_name=f"manto-spec-{report['report_id'][:12]}.md",
+            )
+            right.download_button(
+                "Download specification JSON",
+                json.dumps(report, indent=2),
+                file_name=f"manto-spec-{report['report_id'][:12]}.json",
+            )
+        prompt = st.chat_input("Reply, ask a question, or change an analysis setting…")
+        if prompt:
+            try:
+                with st.spinner("Working on your message…"):
+                    _chat_send(directory, dataset, prompt)
+                st.rerun()
+            except (ValueError, OSError):
+                st.error(
+                    "The conversation could not be updated. Check the input snapshot and retry; your saved results remain available."
+                )
         if st.session_state.get("analysis_result"):
             _render_result(AnalysisResult.model_validate(st.session_state["analysis_result"]))
-            with st.expander("Change a variable and start a new comparison"):
-                _review(directory, dataset)
-        else:
-            _review(directory, dataset)
+            st.caption(
+                "These are the last saved results. Chat changes prepare a new experiment; they do not overwrite these results."
+            )
     with decisions:
         st.markdown("### What happened, and why")
         st.caption(
@@ -507,8 +396,11 @@ def main():
                     st.json(decision.evidence)
         else:
             st.info("Run a comparison to populate the numerical decision trail.")
-        with closing(Conversation(directory / "conversations.sqlite", dataset)) as conversation:
-            graph = conversation.graph_mermaid()
+        for event in st.session_state.get("dialogue_state", {}).get("events", []):
+            with st.expander(f"{event['rule_id']} · {event['outcome']} · {event['turn_id'][:8]}"):
+                st.json(event)
+        with AgentConversation(directory, dataset) as conversation:
+            graph = conversation.graph.get_graph().draw_mermaid()
             topology = conversation.graph.get_graph()
             dot = [
                 'digraph workflow { rankdir=LR; node [shape=box, style="rounded,filled", fillcolor="#eef6f3", color="#13876f", fontname="Arial"];'

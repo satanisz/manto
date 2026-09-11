@@ -122,7 +122,11 @@ class AnalysisDraft(BaseModel):
         changes = {
             key: self.values[key] for key in displayed_fields if self.values[key] is not None
         }
-        return self.patch(changes, turn_id)
+        confirmed = self.patch(changes, turn_id)
+        for key in changes:
+            confirmed.settings[key].source = self.settings[key].source
+            confirmed.settings[key].rationale = self.settings[key].rationale
+        return confirmed
 
     def request(self) -> AnalysisRequest:
         if self.unresolved:

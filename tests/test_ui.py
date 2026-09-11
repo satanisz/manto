@@ -12,13 +12,21 @@ def test_offline_workbench_loads_and_opens_conversation(tmp_path, monkeypatch):
     monkeypatch.setenv("MANTO_ENABLE_LANGFUSE", "false")
     app = AppTest.from_file(str(APP), default_timeout=30).run()
     assert not app.exception
-    assert app.title[0].value == "From a question to an explainable forecast."
+    assert app.title[0].value == "Manto · Analytical conversation"
+    assert not any(item.label == "What do you want to forecast?" for item in app.selectbox)
     button = next(item for item in app.button if item.label.startswith("Try:"))
     button.click().run()
     assert not app.exception
-    assert app.session_state["conversation_state"]["question"]
+    assert app.session_state["dialogue_state"]["pending_fields"]
     assert app.session_state["thread_id"]
-    assert app.session_state["conversation_state"]["request"]["pinned_ids"] == ["inflation"]
+    assert app.session_state["dialogue_state"]["draft"]["settings"]["pinned_ids"]["value"] == [
+        "inflation"
+    ]
+    thread = app.session_state["thread_id"]
+    app.chat_input[0].set_value("How many candidates?").run()
+    assert not app.exception
+    assert app.session_state["thread_id"] == thread
+    assert len(app.session_state["dialogue_state"]["messages"]) == 4
 
 
 def test_offline_full_comparison_and_reopen(tmp_path, monkeypatch):
@@ -27,7 +35,9 @@ def test_offline_full_comparison_and_reopen(tmp_path, monkeypatch):
     monkeypatch.setenv("MANTO_ENABLE_LANGFUSE", "false")
     app = AppTest.from_file(str(APP), default_timeout=120).run()
     next(item for item in app.button if item.label.startswith("Try:")).click().run()
-    next(item for item in app.button if item.label == "Run model comparison").click().run()
+    for message in ["all candidates", "confirm settings", "full", "run"]:
+        app.chat_input[0].set_value(message).run()
+        assert not app.exception
     assert not app.exception
     result = app.session_state["analysis_result"]
     assert result["models"]
@@ -86,7 +96,10 @@ def test_new_chat_target_replaces_previous_widget_selection(tmp_path, monkeypatc
     monkeypatch.setenv("MANTO_ENABLE_GEMINI", "false")
     monkeypatch.setenv("MANTO_ENABLE_LANGFUSE", "false")
     app = AppTest.from_file(str(APP), default_timeout=30).run()
-    assert app.session_state["target_choice"] == "sales"
+    assert "target_choice" not in app.session_state.filtered_state
     app.chat_input[0].set_value("Forecast inflation with 2 variables").run()
     assert not app.exception
-    assert app.session_state["target_choice"] == "inflation"
+    assert (
+        app.session_state["dialogue_state"]["draft"]["settings"]["target_id"]["value"]
+        == "inflation"
+    )
