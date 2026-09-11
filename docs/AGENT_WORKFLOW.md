@@ -3,6 +3,12 @@
 Status: proposed design, 2026-09-08. This graph is not an implemented LangGraph.
 Rule identifiers correspond to the draft [decision policy](../config/decision_policy.toml).
 
+The next conversation-layer increment is specified in the
+[Conversational Agent Executive Plan](CONVERSATIONAL_AGENT_PLAN.md) (2026-09-12).
+Its proposed multi-turn loop and C-prefixed conversation decisions complement
+the numerical D01-D20 roadmap here. Neither proposed graph is a claim that the
+new conversation increment has already been implemented.
+
 ## Responsibilities
 
 LangGraph executes the state machine. The policy engine evaluates numerical and

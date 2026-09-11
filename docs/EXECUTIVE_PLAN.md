@@ -4,6 +4,14 @@ Version 0.1, 2026-09-08. Product roadmap. The sprint 6 demo is now implemented;
 see [actual scope and limitations](DEMO_GUIDE.md). Later milestones remain proposed.
 Numerical thresholds are initial product policies to validate, not universal statistical rules.
 
+2026-09-12 delivery update: the next priority is the owner-confirmed
+[Conversational Agent Executive Plan](CONVERSATIONAL_AGENT_PLAN.md), with sprints
+C1-C6. It replaces the form-led interaction with Gemini-driven multi-turn dialogue,
+explicit discussion of defaults, approved specification reports, and saved
+preliminary/full comparisons. It brings forward conversational and experiment
+management work from original sprints 11-12 without marking sprints 7-14 complete.
+The new plan governs this interaction increment; the statistical roadmap below remains.
+
 ## 1. Product thesis
 
 Manto turns a conversation about a time series into a reproducible analytical

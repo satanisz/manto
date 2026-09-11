@@ -14,6 +14,7 @@ Cointegration/ECM, advanced seasonal models, complete visual residual diagnostic
 and continuous monitoring remain later milestones, not features of this demo.
 
 - [Executive plan and 14-sprint roadmap](docs/EXECUTIVE_PLAN.md)
+- [Next increment: conversational Gemini agent and C1-C6 sprint plan](docs/CONVERSATIONAL_AGENT_PLAN.md)
 - [Agent workflow and decision graph](docs/AGENT_WORKFLOW.md)
 - [Proposed decision policy](config/decision_policy.toml)
 - [Data-source assessment](docs/DATA_SOURCES.md)
