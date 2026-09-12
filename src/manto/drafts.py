@@ -149,3 +149,4 @@ class DialogueState(BaseModel):
     processed_turns: list[str] = Field(default_factory=list)
     language: Literal["en", "pl"] = "en"
     mode: str = "Guided offline recovery"
+    inquiry: dict | None = None

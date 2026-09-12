@@ -41,7 +41,8 @@ provider gets at most 16 recent messages plus the authoritative draft.
 ## Offline recovery
 
 Without a configured service, the chat clearly displays **Guided offline recovery**.
-This is a small command parser, not an equivalent LLM. Open-ended explanations and
+This is a bounded command router, not an equivalent LLM. Versioned explanations of
+every execution setting and selected metrics work locally; open-ended discussion and
 semantic ranking require Gemini. An offline shortlist is explicitly catalog-order,
 not an assertion that those variables will predict the target.
 
@@ -54,6 +55,10 @@ Example commands:
 - `all candidates` or `candidates: inflation demand marketing`
 - `Propose lags` / `Zaproponuj lagi`, then confirm or say `lags 0 1 3`
 - `settings` / `Pokaż ustawienia`
+- `Explain initial_train` / `co robi initial_train?`
+- `what if initial_train is 72?` / `a gdy zwiększę do 72?` after that explanation
+- `set initial_train 72` / `ustaw initial_train na 72` to explicitly apply it
+- `back to setup` / `wróć do konfiguracji` to resume the pending discussion
 - `confirm settings` / `akceptuję ustawienia`
 - `report` / `Pokaż raport`
 - `run` / `uruchom` after a complete, current report
@@ -71,6 +76,35 @@ listed for discussion and group acceptance, never silently treated as consent.
 `yes` confirms the displayed settings/proposal; this implementation deliberately
 requires the separate word `run` or `uruchom` for execution. An invalid or ambiguous
 instruction produces a clarification rather than guessing authorization.
+
+## Explanations and hypothetical changes
+
+The executable conversation graph now has separate `explain_setting`, `what_if`,
+`clarify`, `help`, and `resume_setup` nodes. Every turn still passes through
+`gemini_agent`, a named action node and `persist_reply`. Local, known parameter
+questions are resolved before a provider request; Gemini can also select these
+typed actions. The actual graph and C-prefixed events remain in **Decision trail**.
+The bilingual definitions live in `src/manto/conversation_help.py`; numeric bounds
+come from the execution schema, and events record the explanation source/version.
+
+Explanations include the current value and its confirmation status. Questions do
+not change the draft, approve defaults, discard the report or start computation.
+The current explanation topic survives restart, so a follow-up such as "what if
+72?" can refer to `initial_train` without repeating the name. Ambiguous numbers or
+misspelled setting names trigger clarification; no unknown parameter is invented.
+
+What-if currently supports integer settings and integer lag lists. It validates a
+temporary draft and uses the engine's conservative preflight estimate to compare
+development months, model counts and fit budgets. It does not fit models or predict
+accuracy improvements. Missing configuration and infeasible scopes are reported.
+Other hypothetical value types require explicit specification discussion rather
+than a numeric preview. Result inspection stays separate from parameter definitions.
+
+After a detour, a bare "yes" is not approval of the old pending settings or a
+hypothetical change. Use `back to setup` to review/confirm the original scope, or
+explicitly set a parameter and inspect the updated report. `run` directly after a
+hypothetical preview is blocked until the current report is requested or the change
+is explicitly applied. Previously saved results remain available throughout.
 
 ## Specification and execution
 

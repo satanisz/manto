@@ -28,6 +28,7 @@ from manto.agent_tools import (
     training_evidence,
     validate_catalog,
 )
+from manto.conversation_help import TOPICS, explain_topics, preview_change
 from manto.domain import AnalysisResult, Decision
 from manto.drafts import AnalysisDraft, DialogueState
 from manto.providers import Observability, _plain, redact
@@ -86,6 +87,11 @@ class AgentConversation:
             "results",
             "compare",
             "branch",
+            "explain_setting",
+            "what_if",
+            "clarify",
+            "help",
+            "resume_setup",
         ]
         for action in actions:
             graph.add_node(action, self._tool)
@@ -164,6 +170,20 @@ class AgentConversation:
                     "uruchom",
                     "ustawien",
                     "zaproponuj",
+                    "co robi",
+                    "co to",
+                    "co oznacza",
+                    "co jesli",
+                    "a gdy",
+                    "wyjasnij",
+                    "dlaczego",
+                    "ustaw ",
+                    "wroc",
+                    "pomoc",
+                    "czy ",
+                    "czym ",
+                    "jak dziala",
+                    "po co ",
                 )
             ):
                 state.language = "pl"
@@ -222,9 +242,14 @@ class AgentConversation:
     def _agent(self, turn):
         state = DialogueState.model_validate(turn["dialogue"])
         with self.observability.span("conversation.route", turn["turn_id"]):
-            action = self.service.route(
-                turn["message"], state, catalog_facts(self.dataset, state.draft)
-            )
+            try:
+                action = AgentAction.model_validate(
+                    self.service.route(
+                        turn["message"], state, catalog_facts(self.dataset, state.draft)
+                    )
+                )
+            except (ValueError, TypeError):
+                action = AgentAction(action="clarify", text="invalid_value")
         state.mode = self.service.mode
         return {
             "action": AgentAction.model_validate(action).model_dump(),
@@ -345,6 +370,120 @@ class AgentConversation:
     def _dispatch(self, action, state, turn):
         facts = catalog_facts(self.dataset, state.draft)
         evidence = {}
+        if action.action == "explain_setting":
+            topics = (action.reference or "").split(",")
+            reply = explain_topics(state, topics)
+            state.inquiry = {
+                "kind": "explanation",
+                "topic": topics[0] if len(topics) == 1 else None,
+            }
+            return reply, {
+                "topics": topics,
+                "source": "local_parameter_contract_v1",
+                "read_only": True,
+            }
+        if action.action == "what_if":
+            topic = action.reference
+            if topic not in state.draft.settings:
+                raise ValueError("Name a supported setting for the preview.")
+            state.inquiry = {"kind": "hypothetical", "topic": topic}
+            if action.hypothetical_value is None:
+                return self._local(
+                    state,
+                    f"Which value of {topic} should I preview? Say 'what if {topic} is 72', for example. Nothing has changed.",
+                    f"Jaką wartość {topic} mam sprawdzić? Podaj ją jako pytanie „co jeśli…”. Nic nie zostało zmienione.",
+                ), {"read_only": True}
+            changes = {topic: action.hypothetical_value}
+            try:
+                preview = preview_change(self.dataset, state.draft, changes)
+            except ValueError:
+                return self._local(
+                    state,
+                    "That value does not meet this setting's constraints. No changes were applied. ",
+                    "Ta wartość nie spełnia ograniczeń parametru. Nic nie zostało zmienione. ",
+                ) + explain_topics(state, [topic]), {
+                    "read_only": True,
+                    "invalid_hypothesis": changes,
+                }
+            state.inquiry["changes"] = changes
+            before = state.draft.values[topic]
+            reply = self._local(
+                state,
+                f"Hypothetical change: {topic} {before} → {action.hypothetical_value}.",
+                f"Hipotetyczna zmiana: {topic} {before} → {action.hypothetical_value}.",
+            )
+            if preview["estimates"]:
+                a, b = preview["estimates"]
+                reply += self._local(
+                    state,
+                    f"\n\nDevelopment outcomes: {a['development_origins']} → {b['development_origins']}. Models: {a['model_count']} → {b['model_count']}. Fit budget estimate: {a['estimated_fits']} → {b['estimated_fits']}.",
+                    f"\n\nMiesiące walidacji: {a['development_origins']} → {b['development_origins']}. Modele: {a['model_count']} → {b['model_count']}. Szacowane dopasowania: {a['estimated_fits']} → {b['estimated_fits']}.",
+                )
+                if b["reason"]:
+                    reply += (
+                        "\n\n"
+                        + self._local(
+                            state,
+                            "This scope would be blocked: ",
+                            "Taki zakres byłby zablokowany: ",
+                        )
+                        + b["reason"]
+                    )
+            else:
+                reply += "\n\n" + self._local(
+                    state,
+                    "Choose the target and candidate configuration before I can calculate the workload.",
+                    "Najpierw ustal cel i kandydatów, abym mógł policzyć zakres pracy.",
+                )
+            reply += "\n\n" + self._local(
+                state,
+                "This is a workload preview, not a quality forecast. Nothing was changed or fitted. To apply it, explicitly name the setting and value.",
+                "To podgląd zakresu pracy, nie przewidywanie jakości modelu. Nic nie zmieniłem ani nie trenowałem. Aby zastosować zmianę, napisz wyraźnie „ustaw” z nazwą parametru i wartością.",
+            )
+            return reply, {"read_only": True, "preview": preview}
+        if action.action == "clarify":
+            state.inquiry = {"kind": "clarification", "topic": action.reference}
+            hint = f" `{action.reference}`?" if action.reference in TOPICS else ""
+            reply = (
+                self._local(
+                    state,
+                    "Please specify the parameter or concept you mean.",
+                    "Doprecyzuj, o który parametr lub pojęcie chodzi.",
+                )
+                + hint
+            )
+            if action.text == "number":
+                reply += self._local(
+                    state,
+                    " A number alone might mean candidates, predictors per model, a lag, or training months.",
+                    " Sama liczba może oznaczać kandydatów, zmienne w modelu, lag albo miesiące treningu.",
+                )
+            if action.text == "invalid_value":
+                reply += self._local(
+                    state,
+                    " The value or requested action is not supported; ask for the parameter's limits or provide a valid value.",
+                    " Wartość lub żądana akcja nie jest obsługiwana; zapytaj o ograniczenia parametru albo podaj poprawną wartość.",
+                )
+            if action.text == "multiple_settings":
+                reply += self._local(
+                    state,
+                    ' Change one setting at a time, or use a typed multi-field command: set {"initial_train":72,"holdout_periods":12}.',
+                    ' Zmieniaj po jednym parametrze albo użyj polecenia z nazwami i wartościami: set {"initial_train":72,"holdout_periods":12}.',
+                )
+            return reply + "\n\n" + self._local(
+                state,
+                "For example: 'explain initial_train', 'what if initial_train is 72', or 'set initial_train 72'. No settings changed.",
+                "Na przykład: „co robi initial_train?”, „co jeśli initial_train wynosi 72?” albo „ustaw initial_train 72”. Nic nie zmieniłem.",
+            ), {"read_only": True}
+        if action.action == "help":
+            return self._local(
+                state,
+                "You can ask about any setting, preview a change, inspect candidates/results, or return to setup. Try 'explain initial_train', 'what if initial_train is 72', 'list candidates', or 'back to setup'. A preview never trains or changes settings.",
+                "Możesz zapytać o dowolny parametr, sprawdzić skutki zmiany, obejrzeć kandydatów i wyniki albo wrócić do konfiguracji. Spróbuj: „co robi initial_train?”, „co jeśli initial_train wynosi 72?”, „pokaż listę” lub „wróć do konfiguracji”. Podgląd nigdy nie trenuje ani nie zmienia ustawień.",
+            ), {"read_only": True}
+        if action.action == "resume_setup":
+            state.inquiry = None
+            return self._next(state), {"resumed_configuration": True}
         if action.action == "catalog":
             reply = self._local(
                 state,
@@ -418,6 +557,7 @@ class AgentConversation:
             validate_catalog(self.dataset, state.draft)
             state.report = None
             state.pending_fields = list(changes)
+            state.inquiry = None
             return rationale + "\n\n" + json.dumps(
                 changes, ensure_ascii=False
             ) + "\n\n" + self._local(
@@ -441,12 +581,20 @@ class AgentConversation:
             validate_catalog(self.dataset, state.draft)
             state.report = None
             state.pending_fields = []
+            state.inquiry = None
             if state.result:
                 state.draft.parent_experiment_id = state.result["experiment_id"]
             return self._next(state), {"changes": changes}
         if action.action == "settings":
+            state.inquiry = None
             return self._settings(state), {}
         if action.action == "confirm":
+            if state.inquiry:
+                return self._local(
+                    state,
+                    "I have only explained or previewed a setting. To change it, name the parameter and value; to confirm the previous setup, say 'back to setup' first. Nothing was confirmed.",
+                    "Ostatnio tylko wyjaśniałem parametr lub pokazywałem wariant. Aby go zmienić, podaj nazwę i wartość; aby zatwierdzić wcześniejsze ustawienia, najpierw napisz „wróć do konfiguracji”. Nic nie zostało potwierdzone.",
+                ), {"clarification_required": True}
             if not explicit_confirmation(turn["message"]):
                 raise ValueError(
                     "Explicit confirmation is required. Say 'confirm settings' or 'run'."
@@ -465,8 +613,13 @@ class AgentConversation:
             ), {}
         if action.action == "report":
             state.report = self._report(state)
+            state.inquiry = None
             return render_specification(state.report), {"report_id": state.report["report_id"]}
         if action.action == "run":
+            if state.inquiry and state.inquiry.get("kind") == "hypothetical":
+                raise ValueError(
+                    "A hypothetical preview is not a changed specification. Ask for the current report or explicitly apply the setting first."
+                )
             if not explicit_run(turn["message"]):
                 raise ValueError(
                     "A direct run instruction is required; inspection never starts computation."

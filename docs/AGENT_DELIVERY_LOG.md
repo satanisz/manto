@@ -76,3 +76,23 @@ renamed targets cannot be inferred by the exposure tracker. Full analysis means
 the existing linear engine, not later ECM/seasonality/monitoring milestones.
 
 All delivery commits are local; no remote push was performed for C1-C6.
+
+## Contextual explanation and recovery graph — 2026-09-12
+
+Fixed the reported `co robi initial_train?` generic offline reply. Added explicit
+`explain_setting`, `what_if`, `clarify`, `help`, and `resume_setup` LangGraph nodes,
+a versioned bilingual parameter/metric contract, schema-derived numeric bounds,
+and checkpointed detour context. Known explanations work without a provider call.
+Hypothetical numeric changes use the engine's real workload estimator on a copy;
+they never train, modify configuration, approve defaults or predict model quality.
+Ambiguous confirmations, invalid values, misspellings and multi-field edits fail
+safely; typed JSON edits and stored-result inspection retain their existing paths.
+
+Validation: **98 tests passed in 22.31 seconds**, including the Streamlit screenshot
+regression, restart/follow-up continuity, immutable draft/report checks, no-provider
+and no-fit assertions, and existing numerical/execution tests. Ruff lint/format and
+diff checks pass. Browser verification repeated the exact Polish question in the
+existing local conversation: the reply explains 60 monthly training pairs, the
+expanding window, validation trade-off, current undiscussed value and lower bound
+24. The previous transcript and configuration were preserved. No live provider
+validation is claimed; Gemini/Langfuse acceptance remains a separate gate.

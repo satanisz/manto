@@ -7,6 +7,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, create_model
 
+from manto.conversation_help import help_action
 from manto.domain import AnalysisRequest
 from manto.drafts import digest
 from manto.providers import IntentService, _mentions, _plain, redact
@@ -41,11 +42,17 @@ class AgentAction(BaseModel):
         "results",
         "compare",
         "branch",
+        "explain_setting",
+        "what_if",
+        "clarify",
+        "help",
+        "resume_setup",
     ]
     changes: DraftPatch = Field(default_factory=DraftPatch)
     count: int = Field(default=5, ge=1, le=20)
     text: str = Field(default="", max_length=6000)
     reference: str | None = Field(default=None, max_length=250)
+    hypothetical_value: int | list[int] | None = None
 
 
 class ProposalItem(BaseModel):
@@ -129,6 +136,9 @@ class AgentService:
 
     def route(self, message, state, catalog):
         # Run/confirmation permissions are resolved locally against the pending report.
+        local_action = help_action(message, state)
+        if local_action:
+            return AgentAction.model_validate(local_action)
         if explicit_run(message):
             return AgentAction(action="run")
         if explicit_confirmation(message):
@@ -138,6 +148,7 @@ class AgentService:
             "message": message,
             "draft": state.draft.model_dump(),
             "pending_fields": state.pending_fields,
+            "inquiry": state.inquiry,
             "report_ready": bool(state.report and state.report["ready"]),
             "recent_messages": state.messages[-16:],
             "catalog": catalog,
