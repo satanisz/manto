@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import TypedDict
 from uuid import uuid4
 
+import pandas as pd
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import END, START, StateGraph
 
@@ -283,12 +284,29 @@ class AgentConversation:
         return specification_report(self.dataset, state.draft, exposure=self._exposed(state.draft))
 
     def _exposed(self, draft):
-        # Cross-experiment audit tracking is added with execution; conservative
-        # legacy handling already recognizes any saved audited matching target.
+        # Conservative across snapshots/vintages of the same target, but only
+        # overlapping outcome months contaminate a new audit period.
+        months = self.dataset.observations.loc[
+            self.dataset.observations.series_id == draft.values["target_id"], "period"
+        ]
+        if months.empty:
+            return False
+        end = pd.Timestamp(months.max())
+        start = end - pd.DateOffset(months=draft.values["holdout_periods"] - 1)
         for item in self.store.list_results():
             if item.get("target_id") == draft.values["target_id"]:
                 result = self.store.load(item["experiment_id"])
-                if any("holdout_mae" in model.metrics for model in result.models):
+                periods = [
+                    pd.Timestamp(row["period"])
+                    for model in result.models
+                    for row in model.predictions
+                    if row.get("split") == "holdout"
+                ]
+                if any(start <= period <= end for period in periods):
+                    return True
+                if not periods and any("holdout_mae" in model.metrics for model in result.models):
+                    # Older or incomplete artifacts without dated predictions
+                    # cannot establish that a held-out window remains unexposed.
                     return True
         return False
 
@@ -298,7 +316,9 @@ class AgentConversation:
         original = state.model_copy(deep=True)
         evidence = {}
         try:
-            reply, evidence = self._dispatch(action, state, turn)
+            with self.observability.span("conversation.tool." + action.action, turn["turn_id"]):
+                reply, evidence = self._dispatch(action, state, turn)
+            state.mode = self.service.mode
         except (ValueError, TypeError, KeyError) as exc:
             state = original
             reply = (
@@ -406,6 +426,14 @@ class AgentConversation:
                 "Akceptujesz tę propozycję, czy chcesz coś zmienić?",
             ), {"attachment": evidence, "proposal": changes, "rationale": rationale}
         if action.action == "patch":
+            if (
+                _plain(turn["message"])
+                .strip()
+                .startswith(("why ", "what is ", "how many ", "dlaczego ", "ile "))
+            ):
+                raise ValueError(
+                    "A question cannot confirm or modify configuration. State the desired change explicitly."
+                )
             changes = action.changes.model_dump(exclude_none=True)
             if not changes:
                 raise ValueError("No explicit setting change was identified.")
@@ -534,6 +562,14 @@ class AgentConversation:
                 result.champion_id = None
                 result.status = "exploratory_reused_holdout"
                 result.explanation += " This holdout overlaps previously viewed evidence; the audit is exploratory, not independent qualification."
+                result.decisions.append(
+                    Decision(
+                        rule_id="C_EXPOSURE",
+                        outcome="qualification_overridden",
+                        explanation="Previously viewed holdout outcomes override the numerical D13 qualification; no champion may be promoted.",
+                        evidence={"report_id": report["report_id"], "holdout_exposed": True},
+                    )
+                )
             result.decisions.insert(
                 0,
                 Decision(

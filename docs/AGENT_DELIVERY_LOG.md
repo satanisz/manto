@@ -42,3 +42,37 @@ target selector. End-to-end Streamlit tests cover execution, scatter controls,
 saved-result reopening. Tests cover stale report IDs, replay, terminal JSON parity,
 preliminary future-value poisoning, full branches, and no refit on result reads.
 No live Gemini/Langfuse verification; C6 hardening remains in progress.
+
+## C6 local acceptance — 2026-09-12
+
+Local implementation and recovery checks completed. Final full regression:
+**81 passed in 19.98 seconds**. Ruff lint/format and diff checks pass; changed
+documentation links resolve. `uv build --wheel` succeeds and includes the
+versioned agent prompt. No dependencies were changed.
+
+Additional checks cover Polish turns, pending proposal confirmation with preserved
+rationale, bounded provider failures, rejection of LLM-requested mutations on
+read-only questions, stale approvals, and numerical failure/retry without secrets.
+Holdout exposure checks now consider overlapping outcome months, conservatively
+across snapshots of the same target; C_EXPOSURE explicitly overrides qualification.
+
+Browser acceptance: the live local UI has no target/configuration form; a Polish
+sales question receives a Polish follow-up, then "Ile mamy kandydatów?" returns
+10 available and 0 selected without losing the earlier turn or conversation ID.
+The existing Streamlit integration test covers a full run, axis changes, and reopen.
+
+### Remaining acceptance boundary
+
+Live Gemini and Langfuse verification is **pending**, not passed: local environment
+inspection found neither a Gemini key/model nor Langfuse credentials. No old
+chat-pasted credential was reused. C6 must not be described as fully accepted
+until a bounded live dialogue/trace check succeeds with fresh local configuration.
+
+Documented bounded scope: offline suggestions are catalog-order, evidence uses a
+fixed first-24-month prefix, exact `run`/`uruchom` is required, cross-mode fits are
+recomputed, and legacy checkpoint-only drafts are not automatically migrated.
+Saved legacy results can be explicitly imported. External viewing of data and
+renamed targets cannot be inferred by the exposure tracker. Full analysis means
+the existing linear engine, not later ECM/seasonality/monitoring milestones.
+
+All delivery commits are local; no remote push was performed for C1-C6.

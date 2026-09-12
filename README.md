@@ -5,16 +5,20 @@ model comparison, and monitoring.
 
 ## Status
 
-The first analytical demo (sprints 1-6) is implemented: a local chat workbench,
-monthly data import, past-only linear model search, original-scale forecasts,
-Pareto comparison, a decision trail, and saved results. It runs without API keys.
-Gemini intent extraction and Langfuse tracing are optional integrations.
+The linear demo now has a multi-turn chat workbench: Gemini action routing in
+LangGraph, explicit setting review, approval-bound specification reports,
+preliminary/full experiments, saved comparisons, and original-scale forecasts.
+The interface no longer requires a target/configuration form. Without configured
+Gemini credentials it uses clearly labeled, limited offline recovery commands.
+Provider contracts are mock-tested; live Gemini/Langfuse acceptance is still pending.
 
 Cointegration/ECM, advanced seasonal models, complete visual residual diagnostics,
 and continuous monitoring remain later milestones, not features of this demo.
 
 - [Executive plan and 14-sprint roadmap](docs/EXECUTIVE_PLAN.md)
 - [Next increment: conversational Gemini agent and C1-C6 sprint plan](docs/CONVERSATIONAL_AGENT_PLAN.md)
+- [Conversation commands, configuration, and limitations](docs/CHAT_GUIDE.md)
+- [Implementation and validation ledger](docs/AGENT_DELIVERY_LOG.md)
 - [Agent workflow and decision graph](docs/AGENT_WORKFLOW.md)
 - [Proposed decision policy](config/decision_policy.toml)
 - [Data-source assessment](docs/DATA_SOURCES.md)
@@ -34,8 +38,11 @@ uv run manto ui
 ```
 
 Open [the local workbench](http://127.0.0.1:8501), select **Synthetic sales demo**, click
-the example question, then **Run model comparison**. Three predictors from ten
-with inflation pinned produces 36 models. All example data are synthetic.
+the example question, and continue in chat: `all candidates`, `confirm settings`,
+then `run` after inspecting the report. This first run is preliminary; say `full`
+and approve its new report to add the holdout audit and next forecast. Three
+predictors from ten with inflation pinned produces 36 models at lag zero.
+All example data are synthetic.
 
 For a terminal-only demo or verification:
 

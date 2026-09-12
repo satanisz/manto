@@ -44,8 +44,8 @@ class AgentAction(BaseModel):
     ]
     changes: DraftPatch = Field(default_factory=DraftPatch)
     count: int = Field(default=5, ge=1, le=20)
-    text: str = ""
-    reference: str | None = None
+    text: str = Field(default="", max_length=6000)
+    reference: str | None = Field(default=None, max_length=250)
 
 
 class ProposalItem(BaseModel):
@@ -99,16 +99,21 @@ class AgentService:
             return None
         from google.genai import types
 
+        contents = redact(json.dumps(context, ensure_ascii=False))
+        if len(contents) > 64000:
+            self.mode = "Guided offline recovery (provider context budget exceeded)"
+            return None
         for _ in range(2):
             try:
                 response = self.client.models.generate_content(
                     model=self.model,
-                    contents=redact(json.dumps(context, ensure_ascii=False)),
+                    contents=contents,
                     config=types.GenerateContentConfig(
                         system_instruction=PROMPT,
                         response_mime_type="application/json",
                         response_schema=schema,
                         temperature=0,
+                        max_output_tokens=4096,
                     ),
                 )
                 self.mode = "Gemini agent"
@@ -138,6 +143,27 @@ class AgentService:
             "catalog": catalog,
             "has_result": bool(state.result),
         }
+        if state.result:
+            result = state.result
+            selected = next(
+                (
+                    model
+                    for model in result["models"]
+                    if model["model_id"] == result["recommended_id"]
+                ),
+                None,
+            )
+            context["stored_result_evidence"] = {
+                "experiment_id": result["experiment_id"],
+                "status": result["status"],
+                "explanation": result["explanation"],
+                "run_mode": result.get("run_mode", "full"),
+                "recommended_model": {
+                    key: selected[key] for key in ("model_id", "lags", "metrics", "diagnostics")
+                }
+                if selected
+                else None,
+            }
         return self._generate(AgentAction, context) or self._offline(message, state, catalog)
 
     def propose(self, kind, count, context):
@@ -177,8 +203,11 @@ class AgentService:
         ):
             return AgentAction(action="settings")
         if any(word in plain for word in ("compare", "porownaj")):
-            return AgentAction(action="compare")
+            reference = re.search(r"\b[a-f0-9]{32}\b", plain)
+            return AgentAction(action="compare", reference=reference[0] if reference else None)
         if any(word in plain for word in ("result", "wynik", "selected lag", "wybrane lagi")):
+            return AgentAction(action="results")
+        if state.result and ("lag" in plain or "opozn" in plain) and is_question:
             return AgentAction(action="results")
         if any(word in plain for word in ("propose", "zaproponuj", "przygotuj")):
             if "lag" in plain or "opozn" in plain:

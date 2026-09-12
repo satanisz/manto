@@ -1,7 +1,8 @@
 # First Demo: Run, Inspect, and Verify
 
-Implemented scope: sprint 6 linear analytical demonstration, 2026-09-08.
+Updated 2026-09-12: sprint 6 linear engine with the C1-C5 conversational increment.
 The broader [executive plan](EXECUTIVE_PLAN.md) remains the product roadmap.
+See the [chat guide](CHAT_GUIDE.md) and [current validation ledger](AGENT_DELIVERY_LOG.md).
 
 ## Start locally
 
@@ -16,9 +17,12 @@ Alternatively, the existing virtual environment can run the app with
 
 1. Keep **Synthetic sales demo** selected.
 2. Click **Try: forecast sales with 3 variables, including inflation**.
-3. Review the target, all ten candidates, three-variable model size, inflation pin,
-   and monthly lag zero. The catalog names deliberately say "Fictional".
-4. Click **Run model comparison**. The requested 36 combinations are fully evaluated.
+3. In chat, say `all candidates`, then `confirm settings` after reviewing the
+   explicitly listed suggestions. Ask questions or change settings before confirming.
+4. Inspect the specification report and say `run`. This saves a preliminary
+   development-only comparison. Say `full`, inspect the new report, and say `run`
+   to request the existing holdout audit and next forecast. All 36 combinations
+   are evaluated at lag zero; no search is silently truncated.
 5. Inspect original-scale forecasts, the baseline, Pareto alternatives, metrics,
    transformations and coefficients. Change the displayed model without refitting it.
 6. Open **Decision trail** for rules and evidence, the executable conversation graph,

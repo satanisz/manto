@@ -79,3 +79,40 @@ def test_dataset_mismatch_rejected(tmp_path):
     data.observations.loc[0, "value"] += 1
     with AgentConversation(tmp_path, data) as chat, pytest.raises(ValueError, match="different"):
         chat.state("safe")
+
+
+def test_polish_dialogue_and_proposal_confirmation_keeps_rationale(tmp_path):
+    with AgentConversation(tmp_path, demo_dataset()) as chat:
+        chat.send("pl", "Chcę prognozować sprzedaż z trzema zmiennymi")
+        counted = chat.send("pl", "Ile mamy kandydatów?")
+        assert "Dostępni kandydaci: 10" in counted.messages[-1]["content"]
+        proposal = chat.send("pl", "Zaproponuj 5 kandydatów")
+        reason = proposal.draft.settings["candidate_ids"].rationale
+        confirmed = chat.send("pl", "tak")
+        assert confirmed.draft.settings["candidate_ids"].rationale == reason
+        assert confirmed.draft.settings["candidate_ids"].source == "agent_proposal"
+        chat.send("pl", "Zaproponuj lagi")
+        state = chat.send("pl", "tak")
+        assert state.draft.values["lag_menu"] == [0, 1]
+        assert state.result is None
+
+
+def test_malformed_provider_is_bounded_and_never_leaks_exception(tmp_path):
+    client = MagicMock()
+    client.models.generate_content.side_effect = RuntimeError("private-provider-secret")
+    service = AgentService(client=client, model="test-model")
+    with AgentConversation(tmp_path, demo_dataset(), service=service) as chat:
+        state = chat.send("fallback", "Forecast sales")
+    assert client.models.generate_content.call_count == 2
+    assert "offline" in state.mode
+    assert "private-provider-secret" not in state.model_dump_json()
+    assert state.draft.values["target_id"] == "sales"
+
+
+def test_provider_question_cannot_patch_settings(tmp_path):
+    service = MagicMock(mode="Mock agent")
+    service.route.return_value = AgentAction(action="patch", changes={"model_size": 4})
+    with AgentConversation(tmp_path, demo_dataset(), service=service) as chat:
+        state = chat.send("question", "Why use three variables?")
+        assert state.draft.settings["model_size"].status == "undiscussed"
+        assert state.events[-1]["outcome"] == "rejected"

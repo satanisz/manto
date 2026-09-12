@@ -96,3 +96,35 @@ def test_approval_execution_lineage_and_terminal_report(tmp_path, monkeypatch):
         chat.send("flow", "results")
         assert len(calls) == 3
         assert chat.store.load(first).run_mode == "preliminary"
+
+
+def test_failed_execution_can_retry_without_secret_or_duplicate_result(tmp_path, monkeypatch):
+    monkeypatch.setenv("MANTO_ENABLE_GEMINI", "false")
+    monkeypatch.setenv("MANTO_ENABLE_LANGFUSE", "false")
+
+    def failed(*args, **kwargs):
+        raise RuntimeError("sensitive failure details")
+
+    data = demo_dataset()
+    with AgentConversation(tmp_path, data, analyzer=failed) as chat:
+        ready(chat)
+        state = chat.send("flow", "run")
+        assert not state.result
+        assert "sensitive failure details" not in state.model_dump_json()
+    with AgentConversation(tmp_path, data) as chat:
+        state = chat.send("flow", "run")
+        assert state.result["status"] == "preliminary_completed"
+        assert len(chat.store.list_results()) == 1
+        assert chat.send("flow", "run").result == state.result
+
+
+def test_old_report_cannot_run_after_setting_change(tmp_path, monkeypatch):
+    monkeypatch.setenv("MANTO_ENABLE_GEMINI", "false")
+    with AgentConversation(tmp_path, demo_dataset()) as chat:
+        state = ready(chat)
+        old_id = state.report["report_id"]
+        chat.send("flow", 'set {"model_size":1}')
+        state = chat.send("flow", "run " + old_id)
+        assert state.result is None
+        assert state.events[-1]["outcome"] == "rejected"
+        assert not chat.store.list_results()

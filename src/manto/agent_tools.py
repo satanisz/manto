@@ -148,6 +148,14 @@ def specification_report(dataset: Dataset, draft: AnalysisDraft, *, exposure=Fal
         errors.append(redact(str(exc)))
     payload = {
         "schema_version": 1,
+        "target": next(
+            (
+                {"id": item.id, "title": item.title, "unit": item.unit}
+                for item in dataset.catalog
+                if item.id == draft.values["target_id"]
+            ),
+            None,
+        ),
         "revision": draft.revision,
         "draft": draft.model_dump(),
         "dataset_hash": dataset_digest(dataset),
@@ -177,6 +185,7 @@ def render_specification(report: dict) -> str:
     lines = [
         "## Analysis specification",
         f"Report: `{report['report_id']}`",
+        f"Target: {json.dumps(report.get('target'), ensure_ascii=False)}",
         f"Status: {'READY FOR APPROVAL' if report['ready'] else 'DRAFT — NOT EXECUTABLE'}",
     ]
     for key, setting in report["draft"]["settings"].items():

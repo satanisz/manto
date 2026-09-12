@@ -4,6 +4,12 @@ Version 1.0, 2026-09-12. Owner-confirmed direction; implementation is planned,
 not delivered by this document. This is the next delivery increment after the
 working sprint 6 demo, before the broader statistical and monitoring milestones.
 
+Delivery update, 2026-09-12: C1-C5 are implemented with the bounded behavior and
+limitations in [CHAT_GUIDE.md](CHAT_GUIDE.md). C6 local/mock acceptance is recorded
+in [AGENT_DELIVERY_LOG.md](AGENT_DELIVERY_LOG.md); live Gemini/Langfuse acceptance
+remains pending configuration. The original planned gates below remain the
+reference, not a statement that unverified provider behavior has passed.
+
 ## 1. Executive outcome
 
 Replace the form-led workbench with an interactive analytical conversation.

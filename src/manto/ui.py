@@ -275,7 +275,7 @@ def main():
         st.caption(
             "Gemini requested (fallback available)"
             if gemini
-            else "Guided offline mode · no API key needed"
+            else "Offline recovery · configure Gemini for open-ended conversation"
         )
         st.caption(
             "Your target stays in its natural units. Transformations are internal and recorded."
