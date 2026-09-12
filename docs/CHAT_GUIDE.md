@@ -6,6 +6,11 @@ Run `uv run manto ui`, then open the local workbench. Start with your business
 question. The conversation keeps its ID, transcript, settings, and results as you
 reply, ask questions, or change an earlier choice. No configuration form is required.
 
+The interface and new agent responses use English consistently, including parameter
+help, clarification, proposals and errors. Polish input remains supported, but does
+not switch the response language. Older Polish checkpoints resume in English;
+existing transcripts, user-authored content and saved reports are not rewritten.
+
 Gemini is the conversational agent inside the executable LangGraph. Numerical
 tools enforce catalog IDs, timing, feasible work, and report approval. The graph
 is visible under **Decision trail**, together with C-prefixed conversational
@@ -84,7 +89,7 @@ The executable conversation graph now has separate `explain_setting`, `what_if`,
 `gemini_agent`, a named action node and `persist_reply`. Local, known parameter
 questions are resolved before a provider request; Gemini can also select these
 typed actions. The actual graph and C-prefixed events remain in **Decision trail**.
-The bilingual definitions live in `src/manto/conversation_help.py`; numeric bounds
+The English definitions live in `src/manto/conversation_help.py`; numeric bounds
 come from the execution schema, and events record the explanation source/version.
 
 Explanations include the current value and its confirmation status. Questions do

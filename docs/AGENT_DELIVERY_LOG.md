@@ -96,3 +96,18 @@ existing local conversation: the reply explains 60 monthly training pairs, the
 expanding window, validation trade-off, current undiscussed value and lower bound
 24. The previous transcript and configuration were preserved. No live provider
 validation is claimed; Gemini/Langfuse acceptance remains a separate gate.
+
+## English-only response policy — 2026-09-12
+
+Unified new conversational output in English: removed bilingual response branches
+and duplicate Polish parameter definitions, fixed the reply language to English,
+and updated the Gemini system prompt and routing context. Polish commands remain
+accepted. Legacy `language=pl` checkpoints migrate on load without changing stored
+messages, draft revisions, report approvals or saved artifacts. Explanation events
+now identify `local_parameter_contract_v2_en`.
+
+Validation: **99 tests passed in 25.01 seconds**; Ruff lint/format and diff checks
+pass. Coverage includes legacy checkpoint restart, Polish input with English output,
+and the mocked Gemini English response contract. The running browser conversation
+also answered `co robi initial_train?` in English after rerun. Historical messages
+were preserved. Live Gemini language compliance was not tested. Local commit only.

@@ -52,11 +52,13 @@ def test_gemini_structured_turn_uses_draft_and_bounded_context(tmp_path):
     with AgentConversation(tmp_path, demo_dataset(), service=service) as chat:
         state = chat.send("live-contract", "Prognozuj sprzedaż")
         assert state.mode == "Gemini agent"
-        assert state.language == "pl"
+        assert state.language == "en"
         assert state.draft.values["target_id"] == "sales"
     payload = client.models.generate_content.call_args.kwargs
     assert "sales_change" not in payload["contents"]
     assert payload["config"].response_schema == AgentAction
+    assert '"response_language": "en"' in payload["contents"]
+    assert "Always write user-facing responses" in payload["config"].system_instruction
 
 
 def test_untrusted_agent_cannot_execute_or_confirm_on_read_question(tmp_path):
@@ -85,7 +87,7 @@ def test_polish_dialogue_and_proposal_confirmation_keeps_rationale(tmp_path):
     with AgentConversation(tmp_path, demo_dataset()) as chat:
         chat.send("pl", "Chcę prognozować sprzedaż z trzema zmiennymi")
         counted = chat.send("pl", "Ile mamy kandydatów?")
-        assert "Dostępni kandydaci: 10" in counted.messages[-1]["content"]
+        assert "Available candidates: 10" in counted.messages[-1]["content"]
         proposal = chat.send("pl", "Zaproponuj 5 kandydatów")
         reason = proposal.draft.settings["candidate_ids"].rationale
         confirmed = chat.send("pl", "tak")
@@ -116,3 +118,25 @@ def test_provider_question_cannot_patch_settings(tmp_path):
         state = chat.send("question", "Why use three variables?")
         assert state.draft.settings["model_size"].status == "undiscussed"
         assert state.events[-1]["outcome"] == "rejected"
+
+
+def test_legacy_polish_checkpoint_resumes_in_english_without_rewriting_history(tmp_path):
+    data = demo_dataset()
+    with AgentConversation(tmp_path, data) as chat:
+        original = chat.send("legacy-pl", "Forecast sales")
+        legacy = original.model_dump()
+        legacy["language"] = "pl"
+        legacy["messages"][-1]["content"] = "Jakich kandydatów rozważamy?"
+        chat.graph.update_state(
+            chat._config("legacy-pl"), {"dialogue": legacy}, as_node="persist_reply"
+        )
+    with AgentConversation(tmp_path, data) as chat:
+        restored = chat.state("legacy-pl")
+        assert restored.language == "en"
+        assert restored.messages == legacy["messages"]
+        state = chat.send("legacy-pl", "co robi initial_train?")
+        assert state.language == "en"
+        assert "Minimum usable monthly training pairs" in state.messages[-1]["content"]
+        assert state.messages[: len(legacy["messages"])] == legacy["messages"]
+        assert state.draft == original.draft
+        assert state.report == original.report

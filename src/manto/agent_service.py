@@ -146,6 +146,7 @@ class AgentService:
         context = {
             "task": "Route the current user turn.",
             "message": message,
+            "response_language": "en",
             "draft": state.draft.model_dump(),
             "pending_fields": state.pending_fields,
             "inquiry": state.inquiry,

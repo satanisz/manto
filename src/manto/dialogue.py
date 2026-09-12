@@ -158,35 +158,6 @@ class AgentConversation:
             message = redact(str(message))[:12000]
             if not message.strip():
                 return state
-            plain = _plain(message)
-            if any(
-                word in plain
-                for word in (
-                    "prognoz",
-                    "sprzedaz",
-                    "pokaz",
-                    "ile ",
-                    "zmienn",
-                    "uruchom",
-                    "ustawien",
-                    "zaproponuj",
-                    "co robi",
-                    "co to",
-                    "co oznacza",
-                    "co jesli",
-                    "a gdy",
-                    "wyjasnij",
-                    "dlaczego",
-                    "ustaw ",
-                    "wroc",
-                    "pomoc",
-                    "czy ",
-                    "czym ",
-                    "jak dziala",
-                    "po co ",
-                )
-            ):
-                state.language = "pl"
             state.messages.append({"role": "user", "content": message})
             self.graph.invoke(
                 {"dialogue": state.model_dump(), "message": message, "turn_id": turn_id}, config
@@ -256,17 +227,9 @@ class AgentConversation:
             "dialogue": state.model_dump(),
         }
 
-    @staticmethod
-    def _local(state, english, polish):
-        return polish if state.language == "pl" else english
-
     def _settings(self, state):
         state.pending_fields = list(state.draft.unresolved)
-        text = self._local(
-            state,
-            "These settings still need your confirmation:",
-            "Te ustawienia wymagają jeszcze omówienia i potwierdzenia:",
-        )
+        text = "These settings still need your confirmation:"
         lines = [
             f"- `{key}`: {json.dumps(state.draft.values[key], ensure_ascii=False)} ({state.draft.settings[key].status})"
             for key in state.pending_fields
@@ -276,29 +239,17 @@ class AgentConversation:
             + "\n\n"
             + "\n".join(lines)
             + "\n\n"
-            + self._local(
-                state,
-                "Tell me what to change, or say 'confirm settings' to accept the listed values. Null values must first be supplied. This does not run analysis.",
-                "Powiedz, co zmienić, albo napisz „akceptuję ustawienia”, aby przyjąć wymienione wartości. Brakujące wartości (null) trzeba najpierw podać. To nie uruchamia analizy.",
-            )
+            + "Tell me what to change, or say 'confirm settings' to accept the listed values. Null values must first be supplied. This does not run analysis."
         )
 
     def _next(self, state):
         values = state.draft.values
         if not values["target_id"]:
             state.pending_fields = ["target_id"]
-            return self._local(
-                state,
-                "Which available series should we forecast? Ask me for the catalog if needed.",
-                "Który szereg chcesz prognozować? Mogę przedstawić dostępny katalog.",
-            )
+            return "Which available series should we forecast? Ask me for the catalog if needed."
         if values["candidate_ids"] is None:
             state.pending_fields = ["candidate_ids"]
-            return self._local(
-                state,
-                "Which candidates should we consider? Ask me to list them or propose five with reasons.",
-                "Jakich kandydatów rozważamy? Mogę pokazać listę albo zaproponować pięciu z uzasadnieniem.",
-            )
+            return "Which candidates should we consider? Ask me to list them or propose five with reasons."
         if state.draft.unresolved:
             return self._settings(state)
         state.pending_fields = []
@@ -346,12 +297,7 @@ class AgentConversation:
             state.mode = self.service.mode
         except (ValueError, TypeError, KeyError) as exc:
             state = original
-            reply = (
-                self._local(
-                    state, "I could not apply that change: ", "Nie mogę zastosować tej zmiany: "
-                )
-                + redact(str(exc))[:2000]
-            )
+            reply = "I could not apply that change: " + redact(str(exc))[:2000]
             evidence = {"rejected": True, "reason": type(exc).__name__}
         state.events.append(
             {
@@ -379,7 +325,7 @@ class AgentConversation:
             }
             return reply, {
                 "topics": topics,
-                "source": "local_parameter_contract_v1",
+                "source": "local_parameter_contract_v2_en",
                 "read_only": True,
             }
         if action.action == "what_if":
@@ -388,108 +334,66 @@ class AgentConversation:
                 raise ValueError("Name a supported setting for the preview.")
             state.inquiry = {"kind": "hypothetical", "topic": topic}
             if action.hypothetical_value is None:
-                return self._local(
-                    state,
+                return (
                     f"Which value of {topic} should I preview? Say 'what if {topic} is 72', for example. Nothing has changed.",
-                    f"Jaką wartość {topic} mam sprawdzić? Podaj ją jako pytanie „co jeśli…”. Nic nie zostało zmienione.",
-                ), {"read_only": True}
+                    {"read_only": True},
+                )
             changes = {topic: action.hypothetical_value}
             try:
                 preview = preview_change(self.dataset, state.draft, changes)
             except ValueError:
-                return self._local(
-                    state,
-                    "That value does not meet this setting's constraints. No changes were applied. ",
-                    "Ta wartość nie spełnia ograniczeń parametru. Nic nie zostało zmienione. ",
-                ) + explain_topics(state, [topic]), {
-                    "read_only": True,
-                    "invalid_hypothesis": changes,
-                }
+                return (
+                    "That value does not meet this setting's constraints. No changes were applied. "
+                    + explain_topics(state, [topic]),
+                    {
+                        "read_only": True,
+                        "invalid_hypothesis": changes,
+                    },
+                )
             state.inquiry["changes"] = changes
             before = state.draft.values[topic]
-            reply = self._local(
-                state,
-                f"Hypothetical change: {topic} {before} → {action.hypothetical_value}.",
-                f"Hipotetyczna zmiana: {topic} {before} → {action.hypothetical_value}.",
-            )
+            reply = f"Hypothetical change: {topic} {before} → {action.hypothetical_value}."
             if preview["estimates"]:
                 a, b = preview["estimates"]
-                reply += self._local(
-                    state,
-                    f"\n\nDevelopment outcomes: {a['development_origins']} → {b['development_origins']}. Models: {a['model_count']} → {b['model_count']}. Fit budget estimate: {a['estimated_fits']} → {b['estimated_fits']}.",
-                    f"\n\nMiesiące walidacji: {a['development_origins']} → {b['development_origins']}. Modele: {a['model_count']} → {b['model_count']}. Szacowane dopasowania: {a['estimated_fits']} → {b['estimated_fits']}.",
-                )
+                reply += f"\n\nDevelopment outcomes: {a['development_origins']} → {b['development_origins']}. Models: {a['model_count']} → {b['model_count']}. Fit budget estimate: {a['estimated_fits']} → {b['estimated_fits']}."
                 if b["reason"]:
-                    reply += (
-                        "\n\n"
-                        + self._local(
-                            state,
-                            "This scope would be blocked: ",
-                            "Taki zakres byłby zablokowany: ",
-                        )
-                        + b["reason"]
-                    )
+                    reply += "\n\n" + "This scope would be blocked: " + b["reason"]
             else:
-                reply += "\n\n" + self._local(
-                    state,
-                    "Choose the target and candidate configuration before I can calculate the workload.",
-                    "Najpierw ustal cel i kandydatów, abym mógł policzyć zakres pracy.",
+                reply += (
+                    "\n\n"
+                    + "Choose the target and candidate configuration before I can calculate the workload."
                 )
-            reply += "\n\n" + self._local(
-                state,
-                "This is a workload preview, not a quality forecast. Nothing was changed or fitted. To apply it, explicitly name the setting and value.",
-                "To podgląd zakresu pracy, nie przewidywanie jakości modelu. Nic nie zmieniłem ani nie trenowałem. Aby zastosować zmianę, napisz wyraźnie „ustaw” z nazwą parametru i wartością.",
+            reply += (
+                "\n\n"
+                + "This is a workload preview, not a quality forecast. Nothing was changed or fitted. To apply it, explicitly name the setting and value."
             )
             return reply, {"read_only": True, "preview": preview}
         if action.action == "clarify":
             state.inquiry = {"kind": "clarification", "topic": action.reference}
             hint = f" `{action.reference}`?" if action.reference in TOPICS else ""
-            reply = (
-                self._local(
-                    state,
-                    "Please specify the parameter or concept you mean.",
-                    "Doprecyzuj, o który parametr lub pojęcie chodzi.",
-                )
-                + hint
-            )
+            reply = "Please specify the parameter or concept you mean." + hint
             if action.text == "number":
-                reply += self._local(
-                    state,
-                    " A number alone might mean candidates, predictors per model, a lag, or training months.",
-                    " Sama liczba może oznaczać kandydatów, zmienne w modelu, lag albo miesiące treningu.",
-                )
+                reply += " A number alone might mean candidates, predictors per model, a lag, or training months."
             if action.text == "invalid_value":
-                reply += self._local(
-                    state,
-                    " The value or requested action is not supported; ask for the parameter's limits or provide a valid value.",
-                    " Wartość lub żądana akcja nie jest obsługiwana; zapytaj o ograniczenia parametru albo podaj poprawną wartość.",
-                )
+                reply += " The value or requested action is not supported; ask for the parameter's limits or provide a valid value."
             if action.text == "multiple_settings":
-                reply += self._local(
-                    state,
-                    ' Change one setting at a time, or use a typed multi-field command: set {"initial_train":72,"holdout_periods":12}.',
-                    ' Zmieniaj po jednym parametrze albo użyj polecenia z nazwami i wartościami: set {"initial_train":72,"holdout_periods":12}.',
-                )
-            return reply + "\n\n" + self._local(
-                state,
-                "For example: 'explain initial_train', 'what if initial_train is 72', or 'set initial_train 72'. No settings changed.",
-                "Na przykład: „co robi initial_train?”, „co jeśli initial_train wynosi 72?” albo „ustaw initial_train 72”. Nic nie zmieniłem.",
-            ), {"read_only": True}
+                reply += ' Change one setting at a time, or use a typed multi-field command: set {"initial_train":72,"holdout_periods":12}.'
+            return (
+                reply
+                + "\n\n"
+                + "For example: 'explain initial_train', 'what if initial_train is 72', or 'set initial_train 72'. No settings changed.",
+                {"read_only": True},
+            )
         if action.action == "help":
-            return self._local(
-                state,
+            return (
                 "You can ask about any setting, preview a change, inspect candidates/results, or return to setup. Try 'explain initial_train', 'what if initial_train is 72', 'list candidates', or 'back to setup'. A preview never trains or changes settings.",
-                "Możesz zapytać o dowolny parametr, sprawdzić skutki zmiany, obejrzeć kandydatów i wyniki albo wrócić do konfiguracji. Spróbuj: „co robi initial_train?”, „co jeśli initial_train wynosi 72?”, „pokaż listę” lub „wróć do konfiguracji”. Podgląd nigdy nie trenuje ani nie zmienia ustawień.",
-            ), {"read_only": True}
+                {"read_only": True},
+            )
         if action.action == "resume_setup":
             state.inquiry = None
             return self._next(state), {"resumed_configuration": True}
         if action.action == "catalog":
-            reply = self._local(
-                state,
-                f"Available candidates: {facts['available_count']}; selected: {facts['selected_count']}.",
-                f"Dostępni kandydaci: {facts['available_count']}; wybrani: {facts['selected_count']}.",
-            )
+            reply = f"Available candidates: {facts['available_count']}; selected: {facts['selected_count']}."
             reply += "\n\n" + "\n".join(
                 f"- `{item['id']}` — {item['title']} ({item['unit']})" for item in facts["entries"]
             )
@@ -530,11 +434,7 @@ class AgentConversation:
                     chosen = list(dict.fromkeys([*state.draft.values["pinned_ids"], *ids]))[
                         : action.count
                     ]
-                    rationale = self._local(
-                        state,
-                        "Offline catalog-order shortlist, not a Gemini relevance ranking. Each variable needs a business hypothesis and chronological validation.",
-                        "Lista według kolejności katalogu w trybie offline, nie ranking trafności Gemini. Każda zmienna wymaga hipotezy biznesowej i walidacji chronologicznej.",
-                    )
+                    rationale = "Offline catalog-order shortlist, not a Gemini relevance ranking. Each variable needs a business hypothesis and chronological validation."
                 if not set(state.draft.values["pinned_ids"]).issubset(chosen):
                     raise ValueError(
                         "The proposed shortlist omits a pinned variable; revise count or pins."
@@ -545,11 +445,7 @@ class AgentConversation:
                 rationale = (
                     proposal.explanation
                     if proposal
-                    else self._local(
-                        state,
-                        "Offline suggestion: compare origin-month and one-month-lagged inputs. Availability must still be respected; this is not evidence of an optimal lag.",
-                        "Propozycja offline: porównaj dane z miesiąca początkowego i opóźnione o miesiąc. Nadal obowiązują daty publikacji; to nie dowód optymalnego laga.",
-                    )
+                    else "Offline suggestion: compare origin-month and one-month-lagged inputs. Availability must still be respected; this is not evidence of an optimal lag."
                 )
             state.draft = state.draft.patch(
                 changes, turn["turn_id"], proposed=True, rationale=redact(rationale)
@@ -560,11 +456,11 @@ class AgentConversation:
             state.inquiry = None
             return rationale + "\n\n" + json.dumps(
                 changes, ensure_ascii=False
-            ) + "\n\n" + self._local(
-                state,
-                "Accept this proposal or tell me what to change?",
-                "Akceptujesz tę propozycję, czy chcesz coś zmienić?",
-            ), {"attachment": evidence, "proposal": changes, "rationale": rationale}
+            ) + "\n\n" + "Accept this proposal or tell me what to change?", {
+                "attachment": evidence,
+                "proposal": changes,
+                "rationale": rationale,
+            }
         if action.action == "patch":
             if (
                 _plain(turn["message"])
@@ -590,11 +486,10 @@ class AgentConversation:
             return self._settings(state), {}
         if action.action == "confirm":
             if state.inquiry:
-                return self._local(
-                    state,
+                return (
                     "I have only explained or previewed a setting. To change it, name the parameter and value; to confirm the previous setup, say 'back to setup' first. Nothing was confirmed.",
-                    "Ostatnio tylko wyjaśniałem parametr lub pokazywałem wariant. Aby go zmienić, podaj nazwę i wartość; aby zatwierdzić wcześniejsze ustawienia, najpierw napisz „wróć do konfiguracji”. Nic nie zostało potwierdzone.",
-                ), {"clarification_required": True}
+                    {"clarification_required": True},
+                )
             if not explicit_confirmation(turn["message"]):
                 raise ValueError(
                     "Explicit confirmation is required. Say 'confirm settings' or 'run'."
@@ -606,11 +501,7 @@ class AgentConversation:
                 state.report = None
                 return self._next(state), {"confirmed_fields": confirmed}
             # A generic yes is not interpreted as execution; require explicit run.
-            return self._local(
-                state,
-                "To execute the displayed ready report, say 'run'.",
-                "Aby wykonać pokazany gotowy raport, napisz „uruchom”.",
-            ), {}
+            return "To execute the displayed ready report, say 'run'.", {}
         if action.action == "report":
             state.report = self._report(state)
             state.inquiry = None
@@ -629,11 +520,7 @@ class AgentConversation:
             if action.action == "ask":
                 return action.text or self._next(state), {}
             if not state.result:
-                return self._local(
-                    state,
-                    "No analysis has run yet. Ask for the specification report.",
-                    "Nie wykonano jeszcze analizy. Możesz poprosić o raport konfiguracji.",
-                ), {}
+                return "No analysis has run yet. Ask for the specification report.", {}
             result = AnalysisResult.model_validate(state.result)
             model = next(
                 (
@@ -744,11 +631,7 @@ class AgentConversation:
         return (
             result.explanation
             + "\n\n"
-            + self._local(
-                state,
-                "Saved. Ask about selected lags, inspect models, or change a variable for a linked experiment.",
-                "Zapisano. Możesz zapytać o wybrane lagi, obejrzeć modele albo zmienić zmienną w nowym, powiązanym eksperymencie.",
-            )
+            + "Saved. Ask about selected lags, inspect models, or change a variable for a linked experiment."
         )
 
     def _compare(self, state, reference):

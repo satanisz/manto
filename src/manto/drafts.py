@@ -6,7 +6,7 @@ import hashlib
 import json
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator
 
 from manto.domain import AnalysisRequest
 from manto.policy import load_policy
@@ -147,6 +147,12 @@ class DialogueState(BaseModel):
     result: dict | None = None
     events: list[dict] = Field(default_factory=list)
     processed_turns: list[str] = Field(default_factory=list)
-    language: Literal["en", "pl"] = "en"
+    language: Literal["en"] = "en"
     mode: str = "Guided offline recovery"
     inquiry: dict | None = None
+
+    @field_validator("language", mode="before")
+    @classmethod
+    def migrate_reply_language(cls, value):
+        # Preserve old transcripts and specifications; only future replies change.
+        return "en" if value == "pl" else value

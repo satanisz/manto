@@ -26,12 +26,12 @@ def offline(monkeypatch):
         "po co initial_train?",
     ],
 )
-def test_screenshot_question_has_local_polish_answer(tmp_path, question):
+def test_polish_question_has_local_english_answer(tmp_path, question):
     with AgentConversation(tmp_path, demo_dataset()) as chat:
         state = chat.send("question", question)
     answer = state.messages[-1]["content"]
-    assert "Minimalna liczba" in answer
-    assert "60" in answer and "pięć lat" in answer
+    assert "Minimum usable monthly training pairs" in answer
+    assert "60" in answer and "five years" in answer
     assert "Offline recovery supports" not in answer
     assert state.events[-1]["rule_id"] == "C_explain_setting"
     assert state.draft.revision == 0
@@ -79,7 +79,7 @@ def test_detour_preserves_report_and_pending_fields_then_resumes(tmp_path):
         state = chat.send("flow", "tak")
         assert state.draft == before.draft
         state = chat.send("flow", "Ile mamy kandydatów?")
-        assert "Dostępni kandydaci" in state.messages[-1]["content"]
+        assert "Available candidates" in state.messages[-1]["content"]
         assert state.events[-1]["rule_id"] == "C_catalog"
         chat.send("flow", "wróć do konfiguracji")
         state = chat.send("flow", "akceptuję ustawienia")
@@ -152,5 +152,5 @@ def test_ui_screenshot_regression(tmp_path, monkeypatch):
     app.chat_input[0].set_value("co robi initial_train?").run()
     assert not app.exception
     answer = app.session_state["dialogue_state"]["messages"][-1]["content"]
-    assert "Minimalna liczba" in answer
+    assert "Minimum usable monthly training pairs" in answer
     assert "Offline recovery supports" not in answer
