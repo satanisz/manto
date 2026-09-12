@@ -37,7 +37,15 @@ def catalog_facts(dataset: Dataset, draft: AnalysisDraft) -> dict:
         for item in dataset.catalog
         if item.id != target
     ]
-    return {"available_count": len(entries), "selected_count": len(selected), "entries": entries}
+    return {
+        "available_count": len(entries),
+        "selected_count": len(selected),
+        "entries": entries,
+        "targets": [
+            {"id": item.id, "title": redact(item.title), "unit": redact(item.unit)}
+            for item in dataset.catalog
+        ],
+    }
 
 
 def validate_catalog(dataset: Dataset, draft: AnalysisDraft) -> None:

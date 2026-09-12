@@ -92,10 +92,26 @@ class AgentConversation:
             "clarify",
             "help",
             "resume_setup",
+            "targets",
+            "propose_target",
+            "prepare_analysis",
+            "recover",
         ]
+        graph.add_node("resume_candidate_request", self._resume_candidates)
+        graph.add_edge("resume_candidate_request", "persist_reply")
         for action in actions:
             graph.add_node(action, self._tool)
-            graph.add_edge(action, "persist_reply")
+            if action in {"patch", "confirm"}:
+                graph.add_conditional_edges(
+                    action,
+                    self._after_setting,
+                    {
+                        "resume_candidate_request": "resume_candidate_request",
+                        "persist_reply": "persist_reply",
+                    },
+                )
+            else:
+                graph.add_edge(action, "persist_reply")
         graph.add_edge(START, "gemini_agent")
         graph.add_conditional_edges(
             "gemini_agent",
@@ -316,6 +332,77 @@ class AgentConversation:
     def _dispatch(self, action, state, turn):
         facts = catalog_facts(self.dataset, state.draft)
         evidence = {}
+        if action.action == "targets":
+            return self._target_options(state), {"targets": facts["targets"], "read_only": True}
+        if action.action == "propose_target":
+            options = facts["targets"]
+            if not options:
+                return "No target series are available. Load a dataset first.", {"read_only": True}
+            current = state.draft.values["target_id"]
+            proposal = self.service.propose(
+                "propose_target",
+                1,
+                {
+                    "targets": options,
+                    "current_target": current,
+                    "language": "en",
+                },
+            )
+            if proposal:
+                if len(proposal.items) != 1 or proposal.items[0].series_id not in {
+                    item["id"] for item in options
+                }:
+                    raise ValueError(
+                        "The target proposal must name one available series. Ask for 'target options' or choose an ID."
+                    )
+                chosen = proposal.items[0].series_id
+                reason = proposal.items[0].reason
+            else:
+                designated = next(
+                    (item.id for item in self.dataset.catalog if item.role == "target"), None
+                )
+                chosen = current or designated or options[0]["id"]
+                reason = (
+                    "Keep your current forecasting objective unless your business question has changed."
+                    if current
+                    else "The dataset labels this series as a target; it is a starting suggestion, not evidence of forecastability."
+                    if designated
+                    else "This is the first catalog entry, not a relevance ranking. Choose it only if it matches your business objective."
+                )
+                reason = "Offline suggestion: " + reason
+            state.draft = state.draft.patch(
+                {"target_id": chosen}, turn["turn_id"], proposed=True, rationale=redact(reason)
+            )
+            validate_catalog(self.dataset, state.draft)
+            state.report = None
+            state.pending_fields = ["target_id"]
+            state.inquiry = None
+            return (
+                f"Proposed forecast target: **{chosen}**.\n\n{reason}\n\nAccept this target with 'yes', or say 'target SERIES_ID'. This does not select predictors or run analysis.",
+                {
+                    "proposal": {"target_id": chosen},
+                    "rationale": reason,
+                },
+            )
+        if action.action == "prepare_analysis":
+            state.inquiry = None
+            return "Let's review the analysis setup first. Nothing has run.\n\n" + self._next(
+                state
+            ), {"read_only": True, "execution_authorized": False}
+        if action.action == "recover":
+            state.inquiry = {"kind": "recovery", "topic": None}
+            if not state.draft.values["target_id"]:
+                next_step = self._target_options(state)
+            elif state.draft.values["candidate_ids"] is None:
+                next_step = f"Your target is **{state.draft.values['target_id']}**. Ask 'choose three features' for a proposal, or 'list candidates' to choose yourself."
+            elif state.draft.unresolved:
+                next_step = "Your target and candidate list are set. Ask 'settings' to review the remaining choices, or 'explain initial_train' to discuss a parameter."
+            else:
+                next_step = "Your configuration is complete. Ask 'report' to review it, or 'results' to inspect a saved analysis."
+            return (
+                action.text
+                or "I couldn't confidently interpret that request. No settings changed and no analysis ran."
+            ) + "\n\n" + next_step, {"read_only": True, "recovery": True}
         if action.action == "explain_setting":
             topics = (action.reference or "").split(",")
             reply = explain_topics(state, topics)
@@ -399,8 +486,24 @@ class AgentConversation:
             )
             return reply, facts
         if action.action in {"propose", "lags"}:
-            if not state.draft.values["target_id"]:
-                return self._next(state), {}
+            if (
+                not state.draft.values["target_id"]
+                or state.draft.settings["target_id"].status != "confirmed"
+            ):
+                if action.action == "propose":
+                    state.deferred_proposal_count = action.count
+                reminder = (
+                    f" I will remember your request for {action.count} candidates."
+                    if action.action == "propose"
+                    else " Then ask 'propose lags' again."
+                )
+                return (
+                    "First choose or confirm what to forecast."
+                    + reminder
+                    + "\n\n"
+                    + self._target_options(state),
+                    {"deferred_candidate_count": state.deferred_proposal_count},
+                )
             ids = [item["id"] for item in facts["entries"]][:20]
             evidence = training_evidence(self.dataset, state.draft, ids)
             proposal = self.service.propose(
@@ -454,13 +557,30 @@ class AgentConversation:
             state.report = None
             state.pending_fields = list(changes)
             state.inquiry = None
-            return rationale + "\n\n" + json.dumps(
-                changes, ensure_ascii=False
-            ) + "\n\n" + "Accept this proposal or tell me what to change?", {
-                "attachment": evidence,
-                "proposal": changes,
-                "rationale": rationale,
-            }
+            if action.action == "propose":
+                state.deferred_proposal_count = None
+                summary = (
+                    f"Proposed {len(chosen)} candidate features for **{state.draft.values['target_id']}**: "
+                    + ", ".join(f"`{item}`" for item in chosen)
+                    + ". These are candidates, not a change to predictors per model."
+                )
+            else:
+                summary = (
+                    "Proposed monthly lags: "
+                    + ", ".join(str(lag) for lag in changes["lag_menu"])
+                    + "."
+                )
+            return (
+                summary
+                + "\n\n"
+                + rationale
+                + "\n\nAccept this proposal or tell me what to change?",
+                {
+                    "attachment": evidence,
+                    "proposal": changes,
+                    "rationale": rationale,
+                },
+            )
         if action.action == "patch":
             if (
                 _plain(turn["message"])
@@ -549,6 +669,46 @@ class AgentConversation:
         if action.action == "compare":
             return self._compare(state, action.reference), {}
         raise ValueError("Unsupported agent action.")
+
+    def _target_options(self, state):
+        state.inquiry = {"kind": "target_options", "topic": "target_id"}
+        options = catalog_facts(self.dataset, state.draft)["targets"]
+        current = state.draft.values["target_id"]
+        return (
+            "The target is the one series Y you want to forecast. Features are separate inputs used to explain it.\n\n"
+            + (
+                f"Current target: **{current}**.\n\n"
+                if current
+                else "No target is selected yet.\n\n"
+            )
+            + "Available target options (suitability and history are checked before analysis):\n\n"
+            + "\n".join(f"- `{item['id']}` — {item['title']} ({item['unit']})" for item in options)
+            + "\n\nSay 'target SERIES_ID' to choose, or 'propose target' for a suggestion. Nothing has been changed."
+        )
+
+    @staticmethod
+    def _after_setting(turn):
+        state = DialogueState.model_validate(turn["dialogue"])
+        if (
+            state.deferred_proposal_count
+            and state.draft.values["target_id"]
+            and state.draft.settings["target_id"].status == "confirmed"
+            and not state.inquiry
+            and state.events[-1]["outcome"] != "rejected"
+        ):
+            return "resume_candidate_request"
+        return "persist_reply"
+
+    def _resume_candidates(self, turn):
+        state = DialogueState.model_validate(turn["dialogue"])
+        return self._tool(
+            {
+                **turn,
+                "action": AgentAction(
+                    action="propose", count=state.deferred_proposal_count
+                ).model_dump(),
+            }
+        )
 
     def _execute(self, state, turn):
         report = state.report

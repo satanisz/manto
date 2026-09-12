@@ -150,6 +150,7 @@ class DialogueState(BaseModel):
     language: Literal["en"] = "en"
     mode: str = "Guided offline recovery"
     inquiry: dict | None = None
+    deferred_proposal_count: int | None = Field(default=None, ge=1, le=20)
 
     @field_validator("language", mode="before")
     @classmethod

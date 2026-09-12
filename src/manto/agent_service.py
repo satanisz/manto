@@ -8,7 +8,8 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, create_model
 
 from manto.conversation_help import help_action
-from manto.domain import AnalysisRequest
+from manto.conversation_intents import setup_intent
+from manto.domain import AnalysisRequest, SeriesInfo
 from manto.drafts import digest
 from manto.providers import IntentService, _mentions, _plain, redact
 
@@ -47,6 +48,10 @@ class AgentAction(BaseModel):
         "clarify",
         "help",
         "resume_setup",
+        "targets",
+        "propose_target",
+        "prepare_analysis",
+        "recover",
     ]
     changes: DraftPatch = Field(default_factory=DraftPatch)
     count: int = Field(default=5, ge=1, le=20)
@@ -143,6 +148,16 @@ class AgentService:
             return AgentAction(action="run")
         if explicit_confirmation(message):
             return AgentAction(action="confirm")
+        setup = setup_intent(message)
+        if setup:
+            if setup["action"] == "propose_target" and re.match(
+                r"^(?:please )?(choose|select|pick)\b", _plain(message)
+            ):
+                entries = [SeriesInfo(**item) for item in catalog.get("targets", [])]
+                selected = _mentions(message, entries)
+                if len(selected) == 1:
+                    return AgentAction(action="patch", changes={"target_id": selected[0]})
+            return AgentAction.model_validate(setup)
         context = {
             "task": "Route the current user turn.",
             "message": message,
@@ -182,19 +197,21 @@ class AgentService:
         return self._generate(
             AgentProposal,
             {
-                "task": f"Propose {count} available candidate series"
+                "task": "Propose exactly one forecast target from the supplied target catalog. Explain why it could fit the business objective; do not select predictor features."
+                if kind == "propose_target"
+                else f"Propose {count} available candidate series"
                 if kind == "propose"
                 else "Propose a small monthly lag grid (0-12).",
                 "evidence": context,
-                "rules": "Honor pins, exclude the target. Reasons are hypotheses; do not invent statistics.",
+                "rules": "Select one available target; a suggestion still requires user confirmation. Do not claim forecastability from metadata."
+                if kind == "propose_target"
+                else "Honor pins, exclude the target. Reasons are hypotheses; do not invent statistics.",
             },
         )
 
     @staticmethod
     def _offline(message, state, catalog):
         plain = _plain(message).strip()
-        from manto.domain import SeriesInfo
-
         entries = [
             SeriesInfo(**{k: v for k, v in item.items() if k in {"id", "title", "unit"}})
             for item in catalog["entries"]
@@ -207,6 +224,15 @@ class AgentService:
         is_question = "?" in plain or plain.startswith(
             ("why", "what", "how", "czy", "dlaczego", "jaki", "jakie")
         )
+        if (
+            len(mentioned) == 1
+            and plain == mentioned[0]
+            and (
+                state.pending_fields == ["target_id"]
+                or (state.inquiry or {}).get("topic") == "target_id"
+            )
+        ):
+            return AgentAction(action="patch", changes={"target_id": mentioned[0]})
         if any(word in plain for word in ("report", "raport", "print", "wydruk")):
             return AgentAction(action="report")
         if any(
@@ -238,10 +264,7 @@ class AgentService:
         ):
             return AgentAction(action="catalog")
         if is_question:
-            return AgentAction(
-                action="ask",
-                text="Offline recovery supports catalog, settings, report, results, and explicit changes. Configure Gemini for open-ended analytical discussion.",
-            )
+            return AgentAction(action="recover")
         changes = {}
         if (
             not target or any(word in plain for word in ("forecast", "prognoz", "target", "cel "))
@@ -322,8 +345,5 @@ class AgentService:
         return (
             AgentAction(action="patch", changes=changes)
             if changes
-            else AgentAction(
-                action="ask",
-                text="Could you clarify the target, candidate list, or setting to change? Offline recovery has limited language understanding.",
-            )
+            else AgentAction(action="recover")
         )

@@ -54,6 +54,9 @@ not an assertion that those variables will predict the target.
 Example commands:
 
 - `Forecast sales with 3 variables, including inflation`
+- `What target can be?` / `Show target options` to list possible forecasting objectives
+- `Propose target`, then `yes`, or `target demand` to choose explicitly
+- `Choose for me three relative features` / `Select three relevant predictors`
 - `How many candidates?` / `Ile mamy kandydatów?`
 - `List candidates` / `Pokaż listę`
 - `Propose 5` / `Zaproponuj 5 kandydatów`, then `yes` / `tak`
@@ -81,6 +84,26 @@ listed for discussion and group acceptance, never silently treated as consent.
 `yes` confirms the displayed settings/proposal; this implementation deliberately
 requires the separate word `run` or `uruchom` for execution. An invalid or ambiguous
 instruction produces a clarification rather than guessing authorization.
+
+Target discovery and target proposals are separate graph actions from candidate
+selection. The target list includes the current target; it lists catalog options,
+not a guarantee that each has enough history or is forecastable. Gemini can propose
+one target from metadata. Without Gemini, the suggestion keeps the current target,
+uses the dataset's designated target, or falls back to the first entry, explicitly
+labeling the reason. A target proposal is never silently confirmed.
+
+Feature-selection requests accept common verbs and number words (one through
+twenty). If the target is missing or not yet confirmed, the requested candidate
+count is saved and the `resume_candidate_request` graph node resumes selection
+after target confirmation or explicit selection, including across restarts. The
+shortlist still requires acceptance; its count does not change `model_size`.
+Offline candidate proposals remain catalog-order, not statistical relevance claims.
+
+`Perform analysis` and bounded spelling variants such as `performe analys` route
+to `prepare_analysis`: show missing setup steps or the complete approval report.
+They do not confirm settings or run calculations. Exact `run` still authorizes
+execution only against a ready current report. Unknown requests now receive a
+state-specific next step through `recover`, not a generic offline dead end.
 
 ## Explanations and hypothetical changes
 

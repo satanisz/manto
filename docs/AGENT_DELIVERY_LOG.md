@@ -111,3 +111,30 @@ pass. Coverage includes legacy checkpoint restart, Polish input with English out
 and the mocked Gemini English response contract. The running browser conversation
 also answered `co robi initial_train?` in English after rerun. Historical messages
 were preserved. Live Gemini language compliance was not tested. Local commit only.
+
+## Target discovery and conversational setup recovery — 2026-09-12
+
+The reported conversation exposed three routing failures: ordinary feature-selection
+phrasing was unrecognized, target requests were confused with predictor proposals,
+and near-miss analysis commands ended in generic recovery text. Added `targets`,
+`propose_target`, `prepare_analysis`, `recover`, and `resume_candidate_request`
+graph nodes. A target proposal requires confirmation; no-target feature requests
+persist their requested count and resume after explicit target selection. Common
+selection verbs and number words are supported without changing `model_size`.
+Target suggestions use bounded Gemini metadata or a labeled offline catalog policy.
+Proposal replies show readable selections rather than only a raw settings object.
+
+`performe analys` and similar bounded variants now show the missing setup or review
+report. They do not approve defaults or authorize execution. Unknown input gets a
+next step based on the draft; negations and ambiguous counts do not trigger changes.
+The exact run/report approval boundary remains intact. Offline selection is still
+catalog-order, not evidence of relevance or predictive usefulness.
+
+Validation: **121 tests passed in 32.11 seconds**; Ruff lint/format and diff checks
+pass. New tests cover the exact screenshot sequence in dialogue and Streamlit,
+restart/resumption, target vs. feature semantics, word counts, ready-report no-run
+guards, and a mocked Gemini target proposal. The running browser initially served
+old code while awaiting Rerun; after loading the update, the exact feature request
+correctly remembered three candidates and displayed available target options.
+The temporary browser tab was closed and the user's existing conversation rerun
+without modifying its setup. No live Gemini acceptance or remote push is claimed.
